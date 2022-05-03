@@ -3,7 +3,7 @@
 from astroquery.gaia import Gaia
 from astropy.modeling import models, fitting
 from astropy.table import Table, Column
-import astropy.units as u
+import astropy.units as units
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
 
@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 from matplotlib import gridspec
 import matplotlib.colors as mplColors
 import matplotlib.cm as cm
+
+import yaml
 
 class GaiaClusterMembers(object):
 	'''
@@ -39,6 +41,8 @@ class GaiaClusterMembers(object):
 		self.TMASSMatchCatalog = "gaiaedr3.tmass_psc_xsc_best_neighbour"
 		self.TMASSJoinCatalog = "gaiaedr3.tmass_psc_xsc_join"
 		self.TMASSCatalog = "gaiadr1.tmass_original_valid"
+
+		self.yamlTemplateFileName = "template_base9.yaml" #default demplate for the yaml file
 
 		# maximum error that we will allow in a source to be retrieved (not sure what the best value is here)
 		self.maxPMerror = 5 # mas/year
@@ -107,14 +111,33 @@ class GaiaClusterMembers(object):
 		# minimum membership probability to include in the CMD
 		self.membershipMin = 0.0 
 
+		self.photSigFloor = 0.01 # floor to the photometry errors for the .phot file
+
 		# output
 		self.SQLcmd = ''
 		self.data = None # will be an astropy table
 		self.createPlots = True # set to True to generate plots
 		self.plotNameRoot = ''
-		self.photFileName = 'input.phot'
-		self.yamlFileName = 'base9.yaml'
-		self.photSigFloor = 0.01 # floor to the photometry errors for the .phot file
+		self.photOutputFileName = 'input.phot'
+		self.yamlOutputFileName = 'base9.yaml'
+
+
+		# dict for yaml
+		# lists give [start, prior mean, prior sigma]
+		self.yamlInputDict = {
+			'photFile' : self.photOutputFileName,
+			'outputFileBase' : 'output/base9',
+			'modelDirectory' : 'base-models/',
+			'msRgbModel' : 5,
+			'Fe_H' : [0., 0., 0.3],
+			'Av' : [0., 0., 0.3],
+			'Y' : [0.29, 0.29, 0.0],
+			'carbonicity' : [0.38, 0.38, 0.0],
+			'logAge' : [9., 9., np.inf],
+			'distMod' : [10., 10., 1.],
+		}
+
+
 
 	def getData(self):
 		columns = ', '.join(self.columns)
@@ -206,7 +229,7 @@ class GaiaClusterMembers(object):
 		if (self.verbose > 0):
 			print("Finding parallax members ... ")
 			
-		x = (self.data['parallax']).to(u.parsec, equivalencies=u.parallax()).to(u.parsec).value
+		x = (self.data['parallax']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
 		
 		#1D histogram
 		hpa, bpa = np.histogram(x, bins = self.dbins, range=(self.dmin, self.dmax))
@@ -340,6 +363,9 @@ class GaiaClusterMembers(object):
 		self.data['PPM'] = self.PPM
 
 	def combineMemberships(self):
+		if (self.verbose > 0):
+			print("combining memberships ...")
+
 		# I'm not sure the best way to combine these
 		# We probably want to multiple them together, but if there is no membership (e.g., in RV), then we still keep the star
 		self.data['PRV'].fill_value = 1.
@@ -351,6 +377,9 @@ class GaiaClusterMembers(object):
 								  np.nan_to_num(self.data['PPM'].filled(), nan=1)
 
 	def plotCMD(self):
+		if (self.verbose > 0):
+			print("plotting CMD ...")
+
 		# I could specify the columns to use
 		f, ax = plt.subplots(figsize=(5,8))
 		ax.plot(self.data['g_mean_psf_mag'] - self.data['i_mean_psf_mag'], self.data['g_mean_psf_mag'],'.', color='lightgray')
@@ -366,6 +395,9 @@ class GaiaClusterMembers(object):
 		f.savefig(self.plotNameRoot + 'CMD.pdf', format='PDF', bbox_inches='tight')
 
 	def generatePhotFile(self):
+		if (self.verbose > 0):
+			print("generating phot file ...")
+
 		# create a *.phot file for input to BASE-9
 		# would be nice if this was more general and could handle any set of photometry
 
@@ -374,11 +406,11 @@ class GaiaClusterMembers(object):
 		members = self.data[mask]
 
 		# sort the data by distance from the (user defined) center and also by magnitude to generate IDs
-		center = SkyCoord(self.RA*u.degree, self.Dec*u.degree, frame='icrs')
+		center = SkyCoord(self.RA*units.degree, self.Dec*units.degree, frame='icrs')
 		members['coord'] = SkyCoord(members['ra'], members['dec'], frame='icrs') 
 		members['rCenter'] = center.separation(members['coord'])
 		# create 10 annuli to help with IDs?
-		# members['annulus'] = (np.around(members['rCenter'].to(u.deg).value, decimals = 1)*10 + 1).astype(int)
+		# members['annulus'] = (np.around(members['rCenter'].to(units.deg).value, decimals = 1)*10 + 1).astype(int)
 		# add indices for the radii from the center and g mag for IDs
 		members.sort(['rCenter'])
 		members['rRank'] = np.arange(0,len(members)) + 1
@@ -408,7 +440,7 @@ class GaiaClusterMembers(object):
 					   ]]
 		# rename columns
 		out.rename_column('phot_g_mean_mag', 'G')
-		out.rename_column('phot_bp_mean_mag', 'G_BPbr') #Note, there is G_BPbr and G_BPft in the PARSEC models...
+		out.rename_column('phot_bp_mean_mag', 'G_BPft') #Note, there is G_BPbr and G_BPft in the PARSEC models...
 		out.rename_column('phot_rp_mean_mag', 'G_RP')
 		out.rename_column('g_mean_psf_mag', 'g_ps')
 		out.rename_column('r_mean_psf_mag', 'r_ps')
@@ -416,7 +448,7 @@ class GaiaClusterMembers(object):
 		out.rename_column('z_mean_psf_mag', 'z_ps')
 		out.rename_column('y_mean_psf_mag', 'y_ps')
 		out.rename_column('phot_g_mean_mag_error', 'sigG')
-		out.rename_column('phot_bp_mean_mag_error', 'sigG_BPbr') #Note, there is G_BPbr and G_BPft in the PARSEC models...
+		out.rename_column('phot_bp_mean_mag_error', 'sigG_BPft') #Note, there is G_BPbr and G_BPft in the PARSEC models...
 		out.rename_column('phot_rp_mean_mag_error', 'sigG_RP')
 		out.rename_column('g_mean_psf_mag_error', 'sigg_ps')
 		out.rename_column('r_mean_psf_mag_error', 'sigr_ps')
@@ -432,14 +464,14 @@ class GaiaClusterMembers(object):
 		out.rename_column('membership', 'CMprior')
 
 		# impose a floor to phot error to be safe
-		for c in ['sigG', 'sigG_BPbr', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
+		for c in ['sigG', 'sigG_BPft', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
 			out[c][(out[c] < self.photSigFloor)] = self.photSigFloor
 
 		# replace any nan or mask values with 99.9 for mag and -9.9 for sig
-		for c in ['G', 'G_BPbr', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
+		for c in ['G', 'G_BPft', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
 			out[c].fill_value = 99.9
 			out[c] = out[c].filled()
-		for c in ['sigG', 'sigG_BPbr', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
+		for c in ['sigG', 'sigG_BPft', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
 			out[c].fill_value = -9.9
 			out[c] = out[c].filled()
 
@@ -448,25 +480,80 @@ class GaiaClusterMembers(object):
 		# fdec = np.abs(np.log10(self.photSigFloor)).astype(int)
 		# ffmt = '%-' + str(fdec + 3) + '.' + str(fdec) + 'f'
 		ffmt = '%-7.4f'
-		with open(self.photFileName, 'w', newline='\n') as f:
+		with open(self.photOutputFileName, 'w', newline='\n') as f:
 			ascii.write(out, delimiter=' ', output=f, format = 'basic',
 				formats = {'id': '%' + str(2*zfillN + 1) + 's', 
-						'G': ffmt, 'G_BPbr': ffmt, 'G_RP': ffmt, 
+						'G': ffmt, 'G_BPft': ffmt, 'G_RP': ffmt, 
 						'g_ps': ffmt, 'r_ps': ffmt, 'i_ps': ffmt, 'z_ps': ffmt, 'y_ps': ffmt, 
 						'J_2M': ffmt, 'H_2M': ffmt, 'Ks_2M': ffmt,
-						'sigG': ffmt, 'sigG_BPbr': ffmt, 'sigG_RP': ffmt, 
+						'sigG': ffmt, 'sigG_BPft': ffmt, 'sigG_RP': ffmt, 
 						'sigg_ps': ffmt, 'sigr_ps': ffmt, 'sigi_ps': ffmt, 'sigz_ps': ffmt, 'sigy_ps': ffmt, 
 						'sigJ_2M': ffmt, 'sigH_2M': ffmt, 'sigKs_2M': ffmt,
 						'mass1': '%-5.3f', 'massRatio': '%-5.3f', 'stage1': '%1i','CMprior': '%-5.3f','useDBI': '%1d'
 						}
 				)
 
+		# expose this so it can be used elsewhere
+		self.members = members
 
 
 	def generateYamlFile(self):
+		if (self.verbose > 0):
+			print("generating yaml file ...")
+
 		# create a base9.yaml file for input to BASE-9
 
-		print('...UNDER CONSTRUCTION...')
+		with open(self.yamlTemplateFileName, 'r') as file:
+			yamlOutput = yaml.safe_load(file)
+
+		# to allow for quotes in the output (this may not be necessary)
+		# https://stackoverflow.com/questions/38369833/pyyaml-and-using-quotes-for-strings-only
+		class quoted(str):
+			pass
+		def quoted_presenter(dumper, data):
+			return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='"')
+		yaml.add_representer(quoted, quoted_presenter)
+		# remove the "null" output (again, I'm not sure this is necessary)
+		# https://stackoverflow.com/questions/37200150/can-i-dump-blank-instead-of-null-in-yaml-pyyaml
+		def represent_none(self, _):
+			return self.represent_scalar('tag:yaml.org,2002:null', '')
+		yaml.add_representer(type(None), represent_none)
+
+		yamlOutput['general']['files']['photFile'] = quoted(self.yamlInputDict['photFile'])
+		yamlOutput['general']['files']['outputFileBase'] = quoted(self.yamlInputDict['outputFileBase'])
+		yamlOutput['general']['files']['modelDirectory'] = quoted(self.yamlInputDict['modelDirectory'])
+		yamlOutput['general']['files']['scatterFile'] = quoted("")
+		
+		yamlOutput['general']['main_sequence']['msRgbModel'] = self.yamlInputDict['msRgbModel']
+
+		yamlOutput['general']['cluster']['starting']['Fe_H'] = self.yamlInputDict['Fe_H'][0]
+		yamlOutput['general']['cluster']['starting']['Av'] = self.yamlInputDict['Av'][0]
+		yamlOutput['general']['cluster']['starting']['Y'] = self.yamlInputDict['Y'][0]
+		yamlOutput['general']['cluster']['starting']['carbonicity'] = self.yamlInputDict['carbonicity'][0]
+		yamlOutput['general']['cluster']['starting']['logAge'] = self.yamlInputDict['logAge'][0]
+		yamlOutput['general']['cluster']['starting']['distMod'] = self.yamlInputDict['distMod'][0]
+
+		yamlOutput['general']['cluster']['priors']['means']['Fe_H'] = self.yamlInputDict['Fe_H'][1]
+		yamlOutput['general']['cluster']['priors']['means']['Av'] = self.yamlInputDict['Av'][1]
+		yamlOutput['general']['cluster']['priors']['means']['Y'] = self.yamlInputDict['Y'][1]
+		yamlOutput['general']['cluster']['priors']['means']['carbonicity'] = self.yamlInputDict['carbonicity'][1]
+		yamlOutput['general']['cluster']['priors']['means']['logAge'] = self.yamlInputDict['logAge'][1]
+		yamlOutput['general']['cluster']['priors']['means']['distMod'] = self.yamlInputDict['distMod'][1]
+
+		yamlOutput['general']['cluster']['priors']['sigmas']['Fe_H'] = self.yamlInputDict['Fe_H'][2]
+		yamlOutput['general']['cluster']['priors']['sigmas']['Av'] = self.yamlInputDict['Av'][2]
+		yamlOutput['general']['cluster']['priors']['sigmas']['Y'] = self.yamlInputDict['Y'][2]
+		yamlOutput['general']['cluster']['priors']['sigmas']['carbonicity'] = self.yamlInputDict['carbonicity'][2]
+		yamlOutput['general']['cluster']['priors']['sigmas']['logAge'] = self.yamlInputDict['logAge'][2]
+		yamlOutput['general']['cluster']['priors']['sigmas']['distMod'] = self.yamlInputDict['distMod'][2]
+
+
+		# I hope this doesn't need to be sorted in the same order as the original
+		# This outputs in alphabetical order
+		with open(self.yamlOutputFileName, 'w') as file:
+			yaml.dump(yamlOutput, file, indent = 4)
+
+
 
 	def runAll(self):
 		self.getData()
@@ -476,3 +563,7 @@ class GaiaClusterMembers(object):
 		self.combineMemberships()
 		self.plotCMD()
 		self.generatePhotFile()
+		self.generateYamlFile()
+
+		if (self.verbose > 0):
+			print("done.")
