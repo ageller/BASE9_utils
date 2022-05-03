@@ -2,8 +2,10 @@
 
 from astroquery.gaia import Gaia
 from astropy.modeling import models, fitting
-from astropy.table import Column
+from astropy.table import Table, Column
 import astropy.units as u
+from astropy.coordinates import SkyCoord
+from astropy.io import ascii
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -44,9 +46,7 @@ class GaiaClusterMembers(object):
 		# set to 1 or 2 to print out more (and even more) information
 		self.verbose = 0
 		
-		# set to True to generate plots
-		self.createPlots = True
-		self.plotNameRoot = ''
+
 
 		# columns to select
 		self.columns = ['gaia.source_id',
@@ -55,8 +55,12 @@ class GaiaClusterMembers(object):
 			'gaia.pmra',
 			'gaia.pmdec',
 			'gaia.dr2_radial_velocity',
-			'gaia.bp_rp',
 			'gaia.phot_g_mean_mag',
+			'gaia.phot_g_mean_flux_over_error',
+			'gaia.phot_bp_mean_mag',
+			'gaia.phot_bp_mean_flux_over_error',
+			'gaia.phot_rp_mean_mag',
+			'gaia.phot_rp_mean_flux_over_error',
 			'gaia.parallax',
 			'gaia.ruwe',
 			'best.number_of_neighbours',
@@ -106,6 +110,11 @@ class GaiaClusterMembers(object):
 		# output
 		self.SQLcmd = ''
 		self.data = None # will be an astropy table
+		self.createPlots = True # set to True to generate plots
+		self.plotNameRoot = ''
+		self.photFileName = 'input.phot'
+		self.yamlFileName = 'base9.yaml'
+		self.photSigFloor = 0.01 # floor to the photometry errors for the .phot file
 
 	def getData(self):
 		columns = ', '.join(self.columns)
@@ -133,6 +142,17 @@ class GaiaClusterMembers(object):
 			print(self.SQLcmd)
 		job = Gaia.launch_job_async(self.SQLcmd, dump_to_file=False) #could save this to a file
 		self.data = job.get_results()
+
+		# calculate the photometric errors 
+		# from here: https://cdsarc.unistra.fr/viz-bin/ReadMe/I/350?format=html&tex=true#sRM3.63
+		# found via here: https://astronomy.stackexchange.com/questions/38371/how-can-i-calculate-the-uncertainties-in-magnitude-like-the-cds-does
+		sigmaG_0 = 0.0027553202
+		sigmaGBP_0 = 0.0027901700
+		sigmaGRP_0 = 0.0037793818
+		self.data['phot_g_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_g_mean_flux_over_error'])**2 + sigmaG_0**2)**0.5
+		self.data['phot_bp_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_bp_mean_flux_over_error'])**2 + sigmaGBP_0**2)**0.5
+		self.data['phot_rp_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_rp_mean_flux_over_error'])**2 + sigmaGRP_0**2)**0.5
+
 		if (self.verbose > 2):
 			print(self.data)
 
@@ -345,6 +365,109 @@ class GaiaClusterMembers(object):
 		ax.set_ylabel('g_ps', fontsize=16)
 		f.savefig(self.plotNameRoot + 'CMD.pdf', format='PDF', bbox_inches='tight')
 
+	def generatePhotFile(self):
+		# create a *.phot file for input to BASE-9
+		# would be nice if this was more general and could handle any set of photometry
+
+		# take only those that pass the membership threshold
+		mask = (self.data['membership'] > self.membershipMin) 
+		members = self.data[mask]
+
+		# sort the data by distance from the (user defined) center and also by magnitude to generate IDs
+		center = SkyCoord(self.RA*u.degree, self.Dec*u.degree, frame='icrs')
+		members['coord'] = SkyCoord(members['ra'], members['dec'], frame='icrs') 
+		members['rCenter'] = center.separation(members['coord'])
+		# create 10 annuli to help with IDs?
+		# members['annulus'] = (np.around(members['rCenter'].to(u.deg).value, decimals = 1)*10 + 1).astype(int)
+		# add indices for the radii from the center and g mag for IDs
+		members.sort(['rCenter'])
+		members['rRank'] = np.arange(0,len(members)) + 1
+		members.sort(['phot_g_mean_mag'])
+		members['gRank'] = np.arange(0,len(members)) + 1
+		epoch = 1
+		zfillN = int(np.ceil(np.log10(len(members))))
+		members['id'] = [str(epoch) + str(r).zfill(zfillN) + str(g).zfill(zfillN) for (r,g) in zip(members['rRank'].value, members['gRank'].value) ]
+
+		# include only the columns we need in the output table.
+		# Currently I am not including Gaia photometry
+		# If we want to include Gaia photometry, we need to include errors.  
+		# Maybe we can use "typical errors" from here: https://gea.esac.esa.int/archive/documentation/GEDR3/index.html
+		# add the extra columns for BASE-9
+		members['mass1'] = np.zeros(len(members)) #if we know masses, these could be added
+		members['massRatio'] = np.zeros(len(members)) #if we know mass ratios, these could be added
+		members['stage1'] = np.zeros(len(members)) + 1 #set to 1 for MS and giant stars (use 2(?) for WDs)
+		members['useDBI'] = np.zeros(len(members)) + 1 #set to 1 to use during burn-in.  May want to improve to remove anomalous stars
+		out = members[['id', 
+					   'phot_g_mean_mag', 'phot_bp_mean_mag', 'phot_rp_mean_mag',
+					   'g_mean_psf_mag', 'r_mean_psf_mag', 'i_mean_psf_mag', 'z_mean_psf_mag', 'y_mean_psf_mag',
+					   'j_m', 'h_m', 'ks_m',
+					   'phot_g_mean_mag_error', 'phot_bp_mean_mag_error', 'phot_rp_mean_mag_error',
+					   'g_mean_psf_mag_error', 'r_mean_psf_mag_error', 'i_mean_psf_mag_error', 'z_mean_psf_mag_error', 'y_mean_psf_mag_error',
+					   'j_msigcom', 'h_msigcom', 'ks_msigcom',
+					   'mass1', 'massRatio', 'stage1','membership','useDBI'
+					   ]]
+		# rename columns
+		out.rename_column('phot_g_mean_mag', 'G')
+		out.rename_column('phot_bp_mean_mag', 'G_BPbr') #Note, there is G_BPbr and G_BPft in the PARSEC models...
+		out.rename_column('phot_rp_mean_mag', 'G_RP')
+		out.rename_column('g_mean_psf_mag', 'g_ps')
+		out.rename_column('r_mean_psf_mag', 'r_ps')
+		out.rename_column('i_mean_psf_mag', 'i_ps')
+		out.rename_column('z_mean_psf_mag', 'z_ps')
+		out.rename_column('y_mean_psf_mag', 'y_ps')
+		out.rename_column('phot_g_mean_mag_error', 'sigG')
+		out.rename_column('phot_bp_mean_mag_error', 'sigG_BPbr') #Note, there is G_BPbr and G_BPft in the PARSEC models...
+		out.rename_column('phot_rp_mean_mag_error', 'sigG_RP')
+		out.rename_column('g_mean_psf_mag_error', 'sigg_ps')
+		out.rename_column('r_mean_psf_mag_error', 'sigr_ps')
+		out.rename_column('i_mean_psf_mag_error', 'sigi_ps')
+		out.rename_column('z_mean_psf_mag_error', 'sigz_ps')
+		out.rename_column('y_mean_psf_mag_error', 'sigy_ps')
+		out.rename_column('j_m', 'J_2M')
+		out.rename_column('h_m', 'H_2M')
+		out.rename_column('ks_m', 'Ks_2M')
+		out.rename_column('j_msigcom', 'sigJ_2M')
+		out.rename_column('h_msigcom', 'sigH_2M')
+		out.rename_column('ks_msigcom', 'sigKs_2M')
+		out.rename_column('membership', 'CMprior')
+
+		# impose a floor to phot error to be safe
+		for c in ['sigG', 'sigG_BPbr', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
+			out[c][(out[c] < self.photSigFloor)] = self.photSigFloor
+
+		# replace any nan or mask values with 99.9 for mag and -9.9 for sig
+		for c in ['G', 'G_BPbr', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
+			out[c].fill_value = 99.9
+			out[c] = out[c].filled()
+		for c in ['sigG', 'sigG_BPbr', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
+			out[c].fill_value = -9.9
+			out[c] = out[c].filled()
+
+
+		# write to file with proper formatting
+		# fdec = np.abs(np.log10(self.photSigFloor)).astype(int)
+		# ffmt = '%-' + str(fdec + 3) + '.' + str(fdec) + 'f'
+		ffmt = '%-7.4f'
+		with open(self.photFileName, 'w', newline='\n') as f:
+			ascii.write(out, delimiter=' ', output=f, format = 'basic',
+				formats = {'id': '%' + str(2*zfillN + 1) + 's', 
+						'G': ffmt, 'G_BPbr': ffmt, 'G_RP': ffmt, 
+						'g_ps': ffmt, 'r_ps': ffmt, 'i_ps': ffmt, 'z_ps': ffmt, 'y_ps': ffmt, 
+						'J_2M': ffmt, 'H_2M': ffmt, 'Ks_2M': ffmt,
+						'sigG': ffmt, 'sigG_BPbr': ffmt, 'sigG_RP': ffmt, 
+						'sigg_ps': ffmt, 'sigr_ps': ffmt, 'sigi_ps': ffmt, 'sigz_ps': ffmt, 'sigy_ps': ffmt, 
+						'sigJ_2M': ffmt, 'sigH_2M': ffmt, 'sigKs_2M': ffmt,
+						'mass1': '%-5.3f', 'massRatio': '%-5.3f', 'stage1': '%1i','CMprior': '%-5.3f','useDBI': '%1d'
+						}
+				)
+
+
+
+	def generateYamlFile(self):
+		# create a base9.yaml file for input to BASE-9
+
+		print('...UNDER CONSTRUCTION...')
+
 	def runAll(self):
 		self.getData()
 		self.getRVMembers()
@@ -352,3 +475,4 @@ class GaiaClusterMembers(object):
 		self.getPMMembers()
 		self.combineMemberships()
 		self.plotCMD()
+		self.generatePhotFile()
