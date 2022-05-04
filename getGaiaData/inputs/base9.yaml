@@ -5,69 +5,26 @@ general:
         minMag: -10.0
         priors:
             means:
-                Av: !!python/object/apply:numpy.core.multiarray.scalar
-                - &id001 !!python/object/apply:numpy.dtype
-                    args:
-                    - f8
-                    - false
-                    - true
-                    state: !!python/tuple
-                    - 3
-                    - <
-                    -
-                    -
-                    -
-                    - -1
-                    - -1
-                    - 0
-                - !!binary |
-                    0G9fB84Z0T8=
-                Fe_H: !!python/object/apply:numpy.core.multiarray.scalar
-                - *id001
-                - !!binary |
-                    uB6F61G4nr8=
+                Av: 0.2671999999999999
+                Fe_H: -0.03
                 Y: 0.29
                 carbonicity: 0.38
-                distMod: !!python/object/apply:numpy.core.multiarray.scalar
-                - *id001
-                - !!binary |
-                    lEZ3FB/UJkA=
-                logAge: !!python/object/apply:numpy.core.multiarray.scalar
-                - *id001
-                - !!binary |
-                    KAm65BI3I0A=
+                distMod: 11.414299621162435
+                logAge: 9.60756602068848
             sigmas:
-                Av: !!python/object/apply:numpy.core.multiarray.scalar
-                - *id001
-                - !!binary |
-                    W9zLTPjNaz8=
-                Fe_H: !!python/object/apply:numpy.core.multiarray.scalar
-                - *id001
-                - !!binary |
-                    +jwu4kMokz8=
+                Av: 0.0033941125496955
+                Fe_H: 0.0187082869338697
                 Y: 0.0
                 carbonicity: 0.0
-                distMod: !!python/object/apply:numpy.core.multiarray.scalar
-                - *id001
-                - !!binary |
-                    pjsQoEjHtD8=
+                distMod: 0.08116582782552814
                 logAge: .inf
         starting:
-            Av: !!python/object/apply:numpy.core.multiarray.scalar
-            - *id001
-            - !!binary |
-                0G9fB84Z0T8=
+            Av: 0.2671999999999999
             Fe_H: -0.03
             Y: 0.29
             carbonicity: 0.38
-            distMod: !!python/object/apply:numpy.core.multiarray.scalar
-            - *id001
-            - !!binary |
-                lEZ3FB/UJkA=
-            logAge: !!python/object/apply:numpy.core.multiarray.scalar
-            - *id001
-            - !!binary |
-                KAm65BI3I0A=
+            distMod: 11.414299621162435
+            logAge: 9.60756602068848
     files:
         backend: 0
         modelDirectory: "base-models/"

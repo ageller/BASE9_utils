@@ -524,28 +524,28 @@ class GaiaClusterMembers(object):
 		yamlOutput['general']['files']['modelDirectory'] = quoted(self.yamlInputDict['modelDirectory'])
 		yamlOutput['general']['files']['scatterFile'] = quoted("")
 		
-		yamlOutput['general']['main_sequence']['msRgbModel'] = self.yamlInputDict['msRgbModel']
+		yamlOutput['general']['main_sequence']['msRgbModel'] = int(self.yamlInputDict['msRgbModel'])
 
-		yamlOutput['general']['cluster']['starting']['Fe_H'] = self.yamlInputDict['Fe_H'][0]
-		yamlOutput['general']['cluster']['starting']['Av'] = self.yamlInputDict['Av'][0]
-		yamlOutput['general']['cluster']['starting']['Y'] = self.yamlInputDict['Y'][0]
-		yamlOutput['general']['cluster']['starting']['carbonicity'] = self.yamlInputDict['carbonicity'][0]
-		yamlOutput['general']['cluster']['starting']['logAge'] = self.yamlInputDict['logAge'][0]
-		yamlOutput['general']['cluster']['starting']['distMod'] = self.yamlInputDict['distMod'][0]
+		yamlOutput['general']['cluster']['starting']['Fe_H'] = float(self.yamlInputDict['Fe_H'][0])
+		yamlOutput['general']['cluster']['starting']['Av'] = float(self.yamlInputDict['Av'][0])
+		yamlOutput['general']['cluster']['starting']['Y'] = float(self.yamlInputDict['Y'][0])
+		yamlOutput['general']['cluster']['starting']['carbonicity'] = float(self.yamlInputDict['carbonicity'][0])
+		yamlOutput['general']['cluster']['starting']['logAge'] = float(self.yamlInputDict['logAge'][0])
+		yamlOutput['general']['cluster']['starting']['distMod'] = float(self.yamlInputDict['distMod'][0])
 
-		yamlOutput['general']['cluster']['priors']['means']['Fe_H'] = self.yamlInputDict['Fe_H'][1]
-		yamlOutput['general']['cluster']['priors']['means']['Av'] = self.yamlInputDict['Av'][1]
-		yamlOutput['general']['cluster']['priors']['means']['Y'] = self.yamlInputDict['Y'][1]
-		yamlOutput['general']['cluster']['priors']['means']['carbonicity'] = self.yamlInputDict['carbonicity'][1]
-		yamlOutput['general']['cluster']['priors']['means']['logAge'] = self.yamlInputDict['logAge'][1]
-		yamlOutput['general']['cluster']['priors']['means']['distMod'] = self.yamlInputDict['distMod'][1]
+		yamlOutput['general']['cluster']['priors']['means']['Fe_H'] = float(self.yamlInputDict['Fe_H'][1])
+		yamlOutput['general']['cluster']['priors']['means']['Av'] = float(self.yamlInputDict['Av'][1])
+		yamlOutput['general']['cluster']['priors']['means']['Y'] = float(self.yamlInputDict['Y'][1])
+		yamlOutput['general']['cluster']['priors']['means']['carbonicity'] = float(self.yamlInputDict['carbonicity'][1])
+		yamlOutput['general']['cluster']['priors']['means']['logAge'] = float(self.yamlInputDict['logAge'][1])
+		yamlOutput['general']['cluster']['priors']['means']['distMod'] = float(self.yamlInputDict['distMod'][1])
 
-		yamlOutput['general']['cluster']['priors']['sigmas']['Fe_H'] = self.yamlInputDict['Fe_H'][2]
-		yamlOutput['general']['cluster']['priors']['sigmas']['Av'] = self.yamlInputDict['Av'][2]
-		yamlOutput['general']['cluster']['priors']['sigmas']['Y'] = self.yamlInputDict['Y'][2]
-		yamlOutput['general']['cluster']['priors']['sigmas']['carbonicity'] = self.yamlInputDict['carbonicity'][2]
-		yamlOutput['general']['cluster']['priors']['sigmas']['logAge'] = self.yamlInputDict['logAge'][2]
-		yamlOutput['general']['cluster']['priors']['sigmas']['distMod'] = self.yamlInputDict['distMod'][2]
+		yamlOutput['general']['cluster']['priors']['sigmas']['Fe_H'] = float(self.yamlInputDict['Fe_H'][2])
+		yamlOutput['general']['cluster']['priors']['sigmas']['Av'] = float(self.yamlInputDict['Av'][2])
+		yamlOutput['general']['cluster']['priors']['sigmas']['Y'] = float(self.yamlInputDict['Y'][2])
+		yamlOutput['general']['cluster']['priors']['sigmas']['carbonicity'] = float(self.yamlInputDict['carbonicity'][2])
+		yamlOutput['general']['cluster']['priors']['sigmas']['logAge'] = float(self.yamlInputDict['logAge'][2])
+		yamlOutput['general']['cluster']['priors']['sigmas']['distMod'] = float(self.yamlInputDict['distMod'][2])
 
 
 		# I hope this doesn't need to be sorted in the same order as the original
