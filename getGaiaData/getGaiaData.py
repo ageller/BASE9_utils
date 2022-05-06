@@ -180,7 +180,7 @@ class GaiaClusterMembers(object):
 			print(self.data)
 
 
-	def getRVMembers(self):
+	def getRVMembers(self, savefig=True):
 		# calculate radial-velocity memberships
 		if (self.verbose > 0):
 			print("Finding radial-velocity members ... ")
@@ -216,7 +216,8 @@ class GaiaClusterMembers(object):
 			ax.set_ylabel('N', fontsize = 16)
 			ax.axvline(rvG1D.parameters[1], color='tab:purple', ls='dotted')
 			ax.annotate(f'RV = {rvG1D.parameters[1]:.1f} km/s', (rvG1D.parameters[1] + + 0.05*(self.RVmax - self.RVmin), 0.95*max(hrv)) )
-			f.savefig(self.plotNameRoot + 'RVHist.pdf', format='PDF', bbox_inches='tight')
+			if (savefig):
+				f.savefig(self.plotNameRoot + 'RVHist.pdf', format='PDF', bbox_inches='tight')
 			
 		#membership calculation
 		Fc = models.Gaussian1D()
@@ -224,7 +225,7 @@ class GaiaClusterMembers(object):
 		self.PRV = Fc(x)/rvG1D(x)
 		self.data['PRV'] = self.PRV
 
-	def getParallaxMembers(self):
+	def getParallaxMembers(self, savefig=True):
 		# estimate memberships based on distance (could use Bailer Jones, but this simply uses inverted parallax)
 		if (self.verbose > 0):
 			print("Finding parallax members ... ")
@@ -260,7 +261,8 @@ class GaiaClusterMembers(object):
 			ax.set_ylabel('N', fontsize = 16)
 			ax.axvline(pa1D.parameters[1], color='tab:purple', ls='dotted')
 			ax.annotate(f'd = {pa1D.parameters[1]:.1f} pc', (pa1D.parameters[1] + 0.05*(self.dmax - self.dmin), 0.95*max(hpa)) )
-			f.savefig(self.plotNameRoot + 'dHist.pdf', format='PDF', bbox_inches='tight')
+			if (savefig):
+				f.savefig(self.plotNameRoot + 'dHist.pdf', format='PDF', bbox_inches='tight')
 			
 		#membership calculation
 		Fc = models.Gaussian1D()
@@ -268,7 +270,7 @@ class GaiaClusterMembers(object):
 		self.PPa = Fc(x)/pa1D(x)
 		self.data['PPa'] = self.PPa
 
-	def getPMMembers(self):
+	def getPMMembers(self, savefig=True):
 		if (self.verbose > 0):
 			print("finding proper-motion members ...")
 		
@@ -354,7 +356,8 @@ class GaiaClusterMembers(object):
 			plt.setp(ax3.get_yticklabels(), visible=False)
 			plt.setp(ax3.get_xticklabels()[0], visible=False)
 			f.subplots_adjust(hspace=0., wspace=0.)
-			f.savefig(self.plotNameRoot + 'PMHist.pdf', format='PDF', bbox_inches='tight')
+			if (savefig):
+				f.savefig(self.plotNameRoot + 'PMHist.pdf', format='PDF', bbox_inches='tight')
 
 		#membership calculation
 		Fc = models.Gaussian2D()
@@ -376,23 +379,27 @@ class GaiaClusterMembers(object):
 								  np.nan_to_num(self.data['PPa'], nan=1)*\
 								  np.nan_to_num(self.data['PPM'].filled(), nan=1)
 
-	def plotCMD(self):
+	def plotCMD(self, data=None, x1='g_mean_psf_mag', x2='i_mean_psf_mag', y='g_mean_psf_mag', m='membership', savefig=True):
 		if (self.verbose > 0):
 			print("plotting CMD ...")
 
+		if (data is None):
+			data = self.data
+
 		# I could specify the columns to use
 		f, ax = plt.subplots(figsize=(5,8))
-		ax.plot(self.data['g_mean_psf_mag'] - self.data['i_mean_psf_mag'], self.data['g_mean_psf_mag'],'.', color='lightgray')
+		ax.plot(data[x1] - data[x2], data[y],'.', color='lightgray')
 
 		#members
-		mask = (self.data['membership'] > self.membershipMin) 
-		ax.plot(self.data[mask]['g_mean_psf_mag'] - self.data[mask]['i_mean_psf_mag'], self.data[mask]['g_mean_psf_mag'],'.', color='deeppink')
+		mask = (data[m] > self.membershipMin) 
+		ax.plot(data[mask][x1] - data[mask][x2], data[mask][y],'.', color='deeppink')
 
 		ax.set_ylim(22, 10)
 		ax.set_xlim(-1, 3)
 		ax.set_xlabel('(g_ps - i_ps)', fontsize=16)
 		ax.set_ylabel('g_ps', fontsize=16)
-		f.savefig(self.plotNameRoot + 'CMD.pdf', format='PDF', bbox_inches='tight')
+		if (savefig):
+			f.savefig(self.plotNameRoot + 'CMD.pdf', format='PDF', bbox_inches='tight')
 
 	def generatePhotFile(self):
 		if (self.verbose > 0):
@@ -475,12 +482,24 @@ class GaiaClusterMembers(object):
 			out[c].fill_value = -9.9
 			out[c] = out[c].filled()
 
+		# expose this so it can be used elsewhere
+		self.members = members
+
+		# write the phot file
+		self.dumpPhotFile(out)
+
+
+	def dumpPhotFile(self, out, filename=None):
+		if (filename is None):
+			filename = self.photOutputFileName
+
+		zfillN = int(np.ceil(np.log10(max(out['id'])))) 
 
 		# write to file with proper formatting
 		# fdec = np.abs(np.log10(self.photSigFloor)).astype(int)
 		# ffmt = '%-' + str(fdec + 3) + '.' + str(fdec) + 'f'
 		ffmt = '%-7.4f'
-		with open(self.photOutputFileName, 'w', newline='\n') as f:
+		with open(filename, 'w', newline='\n') as f:
 			ascii.write(out, delimiter=' ', output=f, format = 'basic',
 				formats = {'id': '%' + str(2*zfillN + 1) + 's', 
 						'G': ffmt, 'G_BPft': ffmt, 'G_RP': ffmt, 
@@ -492,10 +511,6 @@ class GaiaClusterMembers(object):
 						'mass1': '%-5.3f', 'massRatio': '%-5.3f', 'stage1': '%1i','CMprior': '%-5.3f','useDBI': '%1d'
 						}
 				)
-
-		# expose this so it can be used elsewhere
-		self.members = members
-
 
 	def generateYamlFile(self):
 		if (self.verbose > 0):
