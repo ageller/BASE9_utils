@@ -1,0 +1,1 @@
+After running singlePopMcmc, for the open cluster project, we want to run sampleMass.  This takes quite a long time, but can be split to run in parallel.  To do this, we need to split the res file and run a separate instance of sampleMass on each subset of the res file.  The code in here is my first attempt at doing this.
