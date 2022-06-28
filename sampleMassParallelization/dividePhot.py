@@ -1,5 +1,8 @@
 # Python script to divid up the res file
-# python divideRes.py --res ngc188.res --phot NGC_188.phot --yaml base9.yaml --nthreads 4
+# prior to running this script, it is advisable to trim the .res file as follows:
+# cp ngc188.res ngc188.res.org
+# cat ngc188.res.org | awk '{if (NR == 1 || $6 == 3) print $0}' > ngc188.res
+# python dividePhot.py --res ngc188.res --phot NGC_188.phot --yaml base9.yaml --nthreads 4
 
 import pandas as pd
 import numpy as np
@@ -7,19 +10,14 @@ import argparse
 import os
 import shutil
 
-def dividePhot(resFile, photFile, yamlFile, nThreads):
-
-	# take only the rows form the res file that have "stage" of 3 (after burn-in)
-	shutil.copy(resFile, resFile + '.org')
-	print("cat " + resFile+".org | awk '{if (NR ==1 || $6 == 3) print $0}' >" + resFile)
-	os.system("cat " + resFile+".org | awk '{if (NR ==1 || $6 == 3) print $0}' >" + resFile)
+def dividePhot(resFile, photFile, yamlFile, nThreads, cmdFile):
 
 	# read in the phot file (as strings so that I keep the formatting)
 	df = pd.read_csv(photFile, sep="\s+", converters={i: str for i in range(100)})
 
 	# generate nthreads subsets of the res file
 	split_df = np.array_split(df, nThreads)
-	print(split_df)
+	#print(split_df)
 
 	# for each subset
 	#   save the subset of the phot file 
@@ -31,23 +29,26 @@ def dividePhot(resFile, photFile, yamlFile, nThreads):
 	# get the root file name from the phot file
 	fnameRoot = photFile.replace('.phot','')
 
+	f = open(cmdFile, 'w')
+
 	for i,usedf in enumerate(split_df):
 		destRoot = fnameRoot + '_' + str(i+1).zfill(nfill)
+
 		# save that phot file
 		destPhot = destRoot + '.phot'
-		#usedf.to_csv(destPhot, index=None, sep=' ')
+		usedf.to_csv(destPhot, index=None, sep=' ')
 
 		# copy the res file
-		#shutil.copy(resFile, destRoot + '.res')
+		shutil.copy(resFile, destRoot + '.res')
 
 		# create the command
 
 		cmd = f"sampleMass --config {yamlFile} --photFile {destPhot} --outputFileBase {destRoot}"
+		f.write(cmd + '\n')
 		print(cmd)
 
+	f.close()
 
-
-	# sampleMass --config <yamlFile> --photFile <photfilename> --outputFileBase <basename for output>
 
 def define_args():
 	parser = argparse.ArgumentParser()
@@ -72,6 +73,11 @@ def define_args():
 		help="number of threads [10]", 
 		default=10
 	)
+	parser.add_argument("-o", "--output", 
+		type=str, 
+		help="output file name for command list [sampleMassCmds.sh]", 
+		default='sampleMassCmds.sh'
+	)
 
 	#https://docs.python.org/2/howto/argparse.html
 	args = parser.parse_args()
@@ -85,4 +91,4 @@ def define_args():
 if __name__ == "__main__":
 
 	args = define_args()
-	dividePhot(args.res, args.phot, args.yaml, args.nthreads)
+	dividePhot(args.res, args.phot, args.yaml, args.nthreads, args.output)
