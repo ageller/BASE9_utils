@@ -10,7 +10,7 @@ import argparse
 import os
 import shutil
 
-def dividePhot(resFile, photFile, yamlFile, nThreads, cmdFile):
+def divide_phot(resFile, photFile, yamlFile, nThreads, cmdFile):
 
 	# read in the phot file (as strings so that I keep the formatting)
 	df = pd.read_csv(photFile, sep="\s+", converters={i: str for i in range(100)})
@@ -29,25 +29,51 @@ def dividePhot(resFile, photFile, yamlFile, nThreads, cmdFile):
 	# get the root file name from the phot file
 	fnameRoot = photFile.replace('.phot','')
 
-	f = open(cmdFile, 'w')
+	with open(cmdFile, 'w') as f:
 
-	for i,usedf in enumerate(split_df):
-		destRoot = fnameRoot + '_' + str(i+1).zfill(nfill)
+		for i,usedf in enumerate(split_df):
+			destRoot = fnameRoot + '_' + str(i+1).zfill(nfill)
 
-		# save that phot file
-		destPhot = destRoot + '.phot'
-		usedf.to_csv(destPhot, index=None, sep=' ')
+			# save that phot file
+			destPhot = destRoot + '.phot'
+			usedf.to_csv(destPhot, index=None, sep=' ')
 
-		# copy the res file
-		shutil.copy(resFile, destRoot + '.res')
+			# copy the res file
+			shutil.copy(resFile, destRoot + '.res')
 
-		# create the command
+			# create the command
 
-		cmd = f"sampleMass --config {yamlFile} --photFile {destPhot} --outputFileBase {destRoot}"
-		f.write(cmd + '\n')
-		print(cmd)
+			cmd = f"sampleMass --config {yamlFile} --photFile {destPhot} --outputFileBase {destRoot}"
+			f.write(cmd + '\n')
+			#print(cmd)
 
-	f.close()
+
+
+def create_srun(nThreads, pname, cmdFile, srunFile):
+	# create an srun script that can be used on Quest
+	cmd = ""
+	cmd += "#!/bin/bash\n"
+	cmd += "#SBATCH --account=p31721\n"
+	cmd += "#SBATCH --partition=long\n"
+	cmd += f"#SBATCH --ntasks={nThreads}\n"
+	cmd += "#SBATCH --time=168:00:00\n"
+	cmd += "#SBATCH --mem-per-cpu=1G\n"
+	cmd += f"#SBATCH --job-name=\"{pname}\"\n"
+	cmd += "#SBATCH --output=\"jobout\"\n"
+	cmd += "#SBATCH --error=\"joberr\"\n\n"
+	cmd += "printf \"Deploying job ...\"\n"
+	cmd += "scontrol show hostnames $SLURM_JOB_NODELIST\n"
+	cmd += "echo $SLURM_SUBMIT_DIR\n"
+	cmd += "printf \"\\n\"\n\n"
+	cmd += "export PATH=$PATH:/projects/p31721/ageller/BASE9/bin\n"
+	cmd += "module purge all\n"
+	cmd += "module load mpi\n"
+	cmd += "conda activate BASE9\n\n"
+	cmd += f"mpiexec -n {nThreads} ./runSampleMassMPI.py --cmdFile {cmdFile}\n\n"
+	cmd += "printf \"==================== done with sampleMass ====================\"\n"
+	
+	with open(srunFile, 'w') as f:
+		f.write(cmd)
 
 
 def define_args():
@@ -73,10 +99,20 @@ def define_args():
 		help="number of threads [10]", 
 		default=10
 	)
-	parser.add_argument("-o", "--output", 
+	parser.add_argument("-c", "--cname", 
 		type=str, 
 		help="output file name for command list [sampleMassCmds.sh]", 
 		default='sampleMassCmds.sh'
+	)
+	parser.add_argument("-a", "--srunName", 
+		type=str, 
+		help="name for the Quest process [BASE9]", 
+		default='BASE9'
+	)
+	parser.add_argument("-s", "--srunFile", 
+		type=str, 
+		help="name for the srung file [srun.sh]", 
+		default='srun.sh'
 	)
 
 	#https://docs.python.org/2/howto/argparse.html
@@ -91,4 +127,5 @@ def define_args():
 if __name__ == "__main__":
 
 	args = define_args()
-	dividePhot(args.res, args.phot, args.yaml, args.nthreads, args.output)
+	divide_phot(args.res, args.phot, args.yaml, args.nthreads, args.cname)
+	create_srun(args.nthreads, args.srunName, args.cname, args.srunFile)
