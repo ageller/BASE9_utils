@@ -25,3 +25,4 @@ __pycache__
 *.res
 *.res.org
 *.ecsv
+srun*.sh
