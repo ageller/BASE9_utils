@@ -1,5 +1,5 @@
 #!/software/anaconda3.6/bin/python
-# update this ^^ to point to the correct python installation
+
 
 # MPI (mpi4py) Python script to execute all the commands in a file list
 
@@ -15,7 +15,7 @@ def run_sampleMass_MPI(commandListFile, index):
 		lines = [line.rstrip() for line in lines]
 
 	cmd = lines[rank]
-	print(cmd)
+	print(index, cmd)
 	os.system(cmd)
 
 
