@@ -291,6 +291,147 @@ class GaiaClusterMembers(object):
 		self.PPa = Fc(x)/pa1D(x)
 		self.data['PPa'] = self.PPa
 
+
+	def getPMMembers2Step(self, savefig=True):
+
+		if (self.verbose > 0):
+			print("finding proper-motion members with two steps...")
+
+		x = self.data['pmra']#*np.cos(self.data['dec']*np.pi/180.)
+		y = self.data['pmdec']
+
+		#1D histograms (use the members here)          
+		pmRAbins = np.linspace(self.PMxmin, self.PMxmax, self.PMxbins)
+		pmDecbins = np.linspace(self.PMymin, self.PMymax, self.PMybins)
+		hx1D, x1D = np.histogram(x, bins=pmRAbins)
+		hy1D, y1D = np.histogram(y, bins=pmDecbins)
+
+		#2D histogram
+		h2D, x2D, y2D = np.histogram2d(x, y, bins=[self.PMxbins, self.PMybins], \
+									   range=[[self.PMxmin, self.PMxmax], [self.PMymin, self.PMymax]])
+
+		# for the fitter
+		fit_p = self.fitter
+		xf, yf = np.meshgrid(x2D[:-1], y2D[:-1], indexing='ij')
+
+		##########
+		# Field
+		PMxguess = x1D[np.argmax(hx1D)]
+		PMyguess = y1D[np.argmax(hy1D)]
+
+		p_init = models.Gaussian2D(np.max(h2D.flatten()), PMxguess, PMyguess, 5, 5)
+		pmG2D_field = fit_p(p_init, xf, yf, h2D)
+		if (self.verbose > 1):
+			print("Field fit:")
+			print(pmG2D_field)
+			print(pmG2D_field.parameters)
+		##########
+
+		##########
+		# Subtracted data
+		# get the fit values in each bin
+		field_values = pmG2D_field(xf, yf).T
+		subtracted_data = h2D - pmG2D_field(xf, yf)
+		##########
+
+
+		#########
+		# Cluster as subtracted data
+		if (self.PMmean[0] is not None):
+			PMxguess = self.PMmean[0]
+		if (self.PMmean[1] is not None):
+			PMyguess = self.PMmean[1]
+
+		p_init = models.Gaussian2D(np.max(subtracted_data.flatten()), PMxguess, PMyguess, 1, 1)
+
+		pmG2D_cluster = fit_p(p_init, xf, yf, subtracted_data)
+		if (self.verbose > 1):
+			print("Cluster fit:")
+			print(pmG2D_cluster)
+			print(pmG2D_cluster.parameters)
+		#########
+
+		if (self.createPlots):
+			# make the plots
+			f = plt.figure(figsize=(16, 8)) 
+			gs0 = gridspec.GridSpec(1, 2, figure=f)
+
+			gs_field = gridspec.GridSpecFromSubplotSpec(2, 2, height_ratios = [1, 3], width_ratios = [3, 1], subplot_spec=gs0[0], hspace=0, wspace=0)
+			ax1_field = plt.subplot(gs_field[0])
+			ax2_field = plt.subplot(gs_field[2])
+			ax3_field = plt.subplot(gs_field[3])
+
+			###### for the field
+			#histograms
+			hx1D, x1D = np.histogram(x, bins=pmRAbins)
+			ax1_field.step(x1D[:-1], hx1D, color='black')
+			ax1_field.plot(x2D[:-1], np.sum(pmG2D_field(xf, yf), axis=1), color='deeppink', lw=5)
+			foo = models.Gaussian2D(*pmG2D_field.parameters[0:6])
+			ax1_field.plot(x2D[:-1], np.sum(foo(xf, yf), axis=1), color='gray')
+			foo = models.Gaussian2D(*pmG2D_field.parameters[6:6])
+			ax1_field.plot(x2D[:-1], np.sum(foo(xf, yf), axis=1), color='darkslateblue', ls='dashed')
+			ax1_field.axvline(pmG2D_field.parameters[1], color='tab:purple', ls='dotted')
+			ax1_field.annotate(r'$\mu_\alpha$ =' + f'{pmG2D_field.parameters[1]:.1f}' + r'mas yr$^{-1}$', (pmG2D_field.parameters[1] + 0.05*(self.PMxmax - self.PMxmin), 0.95*max(hx1D)) )
+
+			hy1D, y1D = np.histogram(y, bins=pmDecbins)
+			ax3_field.step(hy1D, y1D[:-1], color='black')
+			ax3_field.plot(np.sum(pmG2D_field(xf, yf), axis=0), y2D[:-1], color='deeppink', lw=5)
+			foo = models.Gaussian2D(*pmG2D_field.parameters[0:6])
+			ax3_field.plot(np.sum(foo(xf, yf), axis=0), y2D[:-1], color='gray')
+
+			#heatmap
+			h2D, x2D, y2D, im = ax2_field.hist2d(x, y, bins=[self.PMxbins, self.PMybins],\
+										   range=[[self.PMxmin, self.PMxmax], [self.PMymin, self.PMymax]], \
+										   norm = mplColors.LogNorm(), cmap = cm.Greys)
+			ax2_field.contourf(x2D[:-1], y2D[:-1], pmG2D_field(xf, yf).T, cmap=cm.RdPu, bins = 20, \
+						 norm=mplColors.LogNorm(), alpha = 0.3)
+
+			ax1_field.set_xlim(self.PMxmin, self.PMxmax)
+			ax2_field.set_xlim(self.PMxmin, self.PMxmax)
+			ax2_field.set_ylim(self.PMymin, self.PMymax)
+			ax3_field.set_ylim(self.PMymin, self.PMymax)
+			ax2_field.set_xlabel(r'$\mu_\alpha$ (mas yr$^{-1}$)', fontsize=16)
+			ax2_field.set_ylabel(r'$\mu_\delta$ (mas yr$^{-1}$)', fontsize=16)
+			plt.setp(ax1_field.get_yticklabels()[0], visible=False)
+			plt.setp(ax1_field.get_xticklabels(), visible=False)
+			plt.setp(ax3_field.get_yticklabels(), visible=False)
+			plt.setp(ax3_field.get_xticklabels()[0], visible=False)
+
+
+			###### for the cluster
+			gs_cluster = gridspec.GridSpecFromSubplotSpec(2, 2, height_ratios = [1, 3], width_ratios = [3, 1], subplot_spec=gs0[1], hspace=0, wspace=0)
+			ax1_cluster = plt.subplot(gs_cluster[0])
+			ax2_cluster = plt.subplot(gs_cluster[2])
+			ax3_cluster = plt.subplot(gs_cluster[3])
+
+			#histograms
+			ax1_cluster.plot(x2D[:-1], np.sum(subtracted_data, axis=1), color='black', lw=1)
+			ax1_cluster.plot(x2D[:-1], np.sum(pmG2D_cluster(xf, yf), axis=1), color='deeppink', lw=5)
+			ax3_cluster.plot(np.sum(subtracted_data, axis=0), y2D[:-1], color='black', lw=1)
+			ax3_cluster.plot(np.sum(pmG2D_cluster(xf, yf), axis=0), y2D[:-1], color='deeppink', lw=5)
+
+			#heatmap
+			ax2_cluster.contourf(x2D[:-1], y2D[:-1], subtracted_data.T, cmap=cm.Greys, norm=mplColors.LogNorm(), alpha = 0.3)
+			ax2_cluster.contourf(x2D[:-1], y2D[:-1], pmG2D_cluster(xf, yf).T, cmap=cm.RdPu, bins = 20, \
+						 norm=mplColors.LogNorm(), alpha = 0.3)
+
+			ax1_cluster.set_xlim(self.PMxmin, self.PMxmax)
+			ax2_cluster.set_xlim(self.PMxmin, self.PMxmax)
+			ax2_cluster.set_ylim(self.PMymin, self.PMymax)
+			ax3_cluster.set_ylim(self.PMymin, self.PMymax)
+
+			ax2_cluster.set_xlabel(r'$\mu_\alpha$ (mas yr$^{-1}$)', fontsize=16)
+			ax2_cluster.set_ylabel(r'$\mu_\delta$ (mas yr$^{-1}$)', fontsize=16)
+			plt.setp(ax1_cluster.get_yticklabels()[0], visible=False)
+			plt.setp(ax1_cluster.get_xticklabels(), visible=False)
+			plt.setp(ax3_cluster.get_yticklabels(), visible=False)
+			plt.setp(ax3_cluster.get_xticklabels()[0], visible=False)
+			if (savefig):
+				f.savefig(self.plotNameRoot + 'PMHist2Step.pdf', format='PDF', bbox_inches='tight')										
+		#membership calculation
+		self.PPM = pmG2D_cluster(x,y)/(pmG2D_cluster(x,y) + pmG2D_field(x,y))
+		self.data['PPM'] = self.PPM						
+											
 	def getPMMembers(self, savefig=True):
 		if (self.verbose > 0):
 			print("finding proper-motion members ...")
