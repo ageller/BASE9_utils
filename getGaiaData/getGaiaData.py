@@ -35,11 +35,11 @@ class GaiaClusterMembers(object):
 
 		# catalogs (when DR3 comes out, we will change that to the default)
 		# self.catalog = "gaiadr2.gaia_source" 
-		self.GaiaCatalog = "gaiaedr3.gaia_source" 
-		self.PanSTARRSMatchCatalog = "gaiaedr3.panstarrs1_best_neighbour"
+		self.GaiaCatalog = "gaiadr3.gaia_source" 
+		self.PanSTARRSMatchCatalog = "gaiadr3.panstarrs1_best_neighbour"
 		self.PanSTARRSCatalog = "gaiadr2.panstarrs1_original_valid"
-		self.TMASSMatchCatalog = "gaiaedr3.tmass_psc_xsc_best_neighbour"
-		self.TMASSJoinCatalog = "gaiaedr3.tmass_psc_xsc_join"
+		self.TMASSMatchCatalog = "gaiadr3.tmass_psc_xsc_best_neighbour"
+		self.TMASSJoinCatalog = "gaiadr3.tmass_psc_xsc_join"
 		self.TMASSCatalog = "gaiadr1.tmass_original_valid"
 
 		self.yamlTemplateFileName = "template_base9.yaml" #default demplate for the yaml file
@@ -58,7 +58,7 @@ class GaiaClusterMembers(object):
 			'gaia.dec',
 			'gaia.pmra',
 			'gaia.pmdec',
-			'gaia.dr2_radial_velocity',
+			'gaia.radial_velocity',
 			'gaia.phot_g_mean_mag',
 			'gaia.phot_g_mean_flux_over_error',
 			'gaia.phot_bp_mean_mag',
@@ -66,6 +66,7 @@ class GaiaClusterMembers(object):
 			'gaia.phot_rp_mean_mag',
 			'gaia.phot_rp_mean_flux_over_error',
 			'gaia.parallax',
+			'gaia.teff_gspphot',
 			'gaia.ruwe',
 			'best.number_of_neighbours',
 			'best.number_of_mates',
@@ -147,7 +148,7 @@ class GaiaClusterMembers(object):
 
 		# for testing 
 		# self.SQLcmd = f"SELECT TOP 5 {columns} " + \
-		self.SQLcmd = f"SELECT {columns} " + \
+		self.ADQLcmd = f"SELECT {columns} " + \
 		f"FROM {self.GaiaCatalog} AS gaia " + \
 		f"LEFT OUTER JOIN {self.PanSTARRSMatchCatalog} AS best ON gaia.source_id = best.source_id " +  \
 		f"LEFT OUTER JOIN {self.PanSTARRSCatalog} AS ps ON best.original_ext_source_id = ps.obj_id " +  \
@@ -162,8 +163,8 @@ class GaiaClusterMembers(object):
 		f"AND gaia.pmdec IS NOT NULL AND abs(gaia.pmdec)>0;"
 
 		if (self.verbose > 1):
-			print(self.SQLcmd)
-		job = Gaia.launch_job_async(self.SQLcmd, dump_to_file=False) #could save this to a file
+			print(self.ADQLcmd)
+		job = Gaia.launch_job_async(self.ADQLcmd, dump_to_file=False) #could save this to a file
 		self.data = job.get_results()
 
 		# calculate the photometric errors 
@@ -180,12 +181,32 @@ class GaiaClusterMembers(object):
 			print(self.data)
 
 
+	def saveDataToFile(self, filename=None):
+		# save the data to an ecsv file
+		if (filename is None):
+			filename = 'GaiaData.ecsv'
+
+		if (self.verbose > 0):
+			print(f"Saving data to file {filename} ... ")
+
+		self.data.write(filename, overwrite=True)  
+
+	def readDataFromFile(self, filename=None):
+		# sread ave the data from an ecsv file
+		if (filename is None):
+			filename = 'GaiaData.ecsv'
+
+		if (self.verbose > 0):
+			print(f"Reading data from file {filename} ... ")
+
+		self.data = ascii.read(filename)  		
+
 	def getRVMembers(self, savefig=True):
 		# calculate radial-velocity memberships
 		if (self.verbose > 0):
 			print("Finding radial-velocity members ... ")
 		
-		x = self.data['dr2_radial_velocity']
+		x = self.data['radial_velocity']
 		
 		#1D histogram
 		hrv, brv = np.histogram(x, bins = self.RVbins, range=(self.RVmin, self.RVmax))
@@ -447,7 +468,7 @@ class GaiaClusterMembers(object):
 					   ]]
 		# rename columns
 		out.rename_column('phot_g_mean_mag', 'G')
-		out.rename_column('phot_bp_mean_mag', 'G_BPft') #Note, there is G_BPbr and G_BPft in the PARSEC models...
+		out.rename_column('phot_bp_mean_mag', 'G_BP') 
 		out.rename_column('phot_rp_mean_mag', 'G_RP')
 		out.rename_column('g_mean_psf_mag', 'g_ps')
 		out.rename_column('r_mean_psf_mag', 'r_ps')
@@ -455,7 +476,7 @@ class GaiaClusterMembers(object):
 		out.rename_column('z_mean_psf_mag', 'z_ps')
 		out.rename_column('y_mean_psf_mag', 'y_ps')
 		out.rename_column('phot_g_mean_mag_error', 'sigG')
-		out.rename_column('phot_bp_mean_mag_error', 'sigG_BPft') #Note, there is G_BPbr and G_BPft in the PARSEC models...
+		out.rename_column('phot_bp_mean_mag_error', 'sigG_BP') 
 		out.rename_column('phot_rp_mean_mag_error', 'sigG_RP')
 		out.rename_column('g_mean_psf_mag_error', 'sigg_ps')
 		out.rename_column('r_mean_psf_mag_error', 'sigr_ps')
@@ -471,14 +492,14 @@ class GaiaClusterMembers(object):
 		out.rename_column('membership', 'CMprior')
 
 		# impose a floor to phot error to be safe
-		for c in ['sigG', 'sigG_BPft', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
+		for c in ['sigG', 'sigG_BP', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
 			out[c][(out[c] < self.photSigFloor)] = self.photSigFloor
 
 		# replace any nan or mask values with 99.9 for mag and -9.9 for sig
-		for c in ['G', 'G_BPft', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
+		for c in ['G', 'G_BP', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
 			out[c].fill_value = 99.9
 			out[c] = out[c].filled()
-		for c in ['sigG', 'sigG_BPft', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
+		for c in ['sigG', 'sigG_BP', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
 			out[c].fill_value = -9.9
 			out[c] = out[c].filled()
 
@@ -493,7 +514,7 @@ class GaiaClusterMembers(object):
 		if (filename is None):
 			filename = self.photOutputFileName
 
-        idint = list(map(int, out['id']))
+		idint = list(map(int, out['id']))
 		zfillN = int(np.ceil(np.log10(max(idint)))) 
 
 		# write to file with proper formatting
@@ -503,10 +524,10 @@ class GaiaClusterMembers(object):
 		with open(filename, 'w', newline='\n') as f:
 			ascii.write(out, delimiter=' ', output=f, format = 'basic',
 				formats = {'id': '%' + str(2*zfillN + 1) + 's', 
-						'G': ffmt, 'G_BPft': ffmt, 'G_RP': ffmt, 
+						'G': ffmt, 'G_BP': ffmt, 'G_RP': ffmt, 
 						'g_ps': ffmt, 'r_ps': ffmt, 'i_ps': ffmt, 'z_ps': ffmt, 'y_ps': ffmt, 
 						'J_2M': ffmt, 'H_2M': ffmt, 'Ks_2M': ffmt,
-						'sigG': ffmt, 'sigG_BPft': ffmt, 'sigG_RP': ffmt, 
+						'sigG': ffmt, 'sigG_BP': ffmt, 'sigG_RP': ffmt, 
 						'sigg_ps': ffmt, 'sigr_ps': ffmt, 'sigi_ps': ffmt, 'sigz_ps': ffmt, 'sigy_ps': ffmt, 
 						'sigJ_2M': ffmt, 'sigH_2M': ffmt, 'sigKs_2M': ffmt,
 						'mass1': '%-5.3f', 'massRatio': '%-5.3f', 'stage1': '%1i','CMprior': '%-5.3f','useDBI': '%1d'
