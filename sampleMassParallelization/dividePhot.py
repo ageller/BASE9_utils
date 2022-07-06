@@ -1,19 +1,33 @@
-# Python script to divid up the res file
+'''
+Python script to :
+	1. trim the .res file to include only stage 3 (trim_res)
+	2. divide the phot file into chunks (divide_phot)
+	3. generate a job script for Quest to run sampleMass in parallel
 
-##############################
+example command:
+	python dividePhot.py --res ngc188.res --phot NGC_188.phot --yaml base9.yaml --nthreads 4
 '''
- prior to running this script, it is advisable to trim the .res file as follows:
- $ cp ngc188.res ngc188.res.org
- $ cat ngc188.res.org | awk '{if (NR == 1 || $6 == 3) print $0}' > ngc188.res
- $ python dividePhot.py --res ngc188.res --phot NGC_188.phot --yaml base9.yaml --nthreads 4
-'''
-##############################
+
 
 import pandas as pd
 import numpy as np
 import argparse
-import os
 import shutil
+import subprocess, sys, shlex
+
+def trim_res(resFile):
+
+	# save the original res file
+	shutil.copy(resFile, resFile + '.org')
+
+	# trim the file using awk
+	cmd = f"cat {resFile}.org | awk '{{if (NR == 1 || $6 == 3) print $0}}' > {resFile}"
+	process = subprocess.Popen(shlex.split(cmd), 
+		stdout=subprocess.PIPE, 
+		stderr=subprocess.PIPE, 
+		shell=True)
+
+	stdout, stderr = process.communicate()
 
 def divide_phot(resFile, photFile, yamlFile, nThreads):
 
@@ -128,6 +142,7 @@ def define_args():
 if __name__ == "__main__":
 
 	args = define_args()
+	trim_res(args.res)
 	divide_phot(args.res, args.phot, args.yaml, args.nthreads)
 	create_srun(args.nthreads, args.srunName, args.yaml, args.phot, args.srunFile)
 
