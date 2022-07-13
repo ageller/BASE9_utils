@@ -1,4 +1,4 @@
-## From Elizabet Jeffery
+## From Elizabeth Jeffery
 - **mcmc_results.py**: shows on the screen the average and standard deviation of each of the four parameters (post burn-in) in the .res file. It runs on the command line; usage: `./mcmc_results.py mystar.res`
 
 - **plot_mcmc.py**: makes two plots from the .res file; one is the trace plot (post burn-in) for each of the four parameters, the other is a histogram of the mcmc chain. Usage: `./plot_mcmc.py mystar.res`
