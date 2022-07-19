@@ -5,7 +5,7 @@
 
 - **stats_sampleWDMass.py**: prints to the screen the average and standard deviation (post burn-in) of each parameter sampled on by sampleWDMass. Usage: `./stats_sampleWDMass.py mystar.res`
 
-- **check_cmd.py**: make a quick CMD of a .phot file (including error bars), outputs cmd.png.  Usage: `./check_cmd.py <phot file> <y-axis filter> <x-axis color>` e.g., `./check_cmd.py hyades.phot V B-V`
+- **check_cmd.py**: make a quick CMD of a .phot file (including error bars), outputs cmd.png.  Usage: `./check_cmd.py <phot file> <y-axis filter> <x-axis color>` e.g., `./check_cmd.py hyades.phot V B-V` .  Aaron added an additional optional input argument with the isochrone file name; if specified the isochrone is overplotted in red.
 
 As can be seen on the first line of each script, it has the python path set as `#!/usr/bin/python3.8`. This may need to be changed, depending on where the python executables are stored. It also assumes you have numpy as matplotlib installed, which most python users do.
 

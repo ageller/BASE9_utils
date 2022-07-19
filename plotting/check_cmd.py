@@ -57,6 +57,22 @@ plt.ylim(1.1*np.max(ymag),N*np.min(ymag))
 plt.ylabel(ylabel)
 plt.xlabel(xlabel)
 plt.title(photfile)
+
+
+if (len(sys.argv) > 4):
+    cmdfile = sys.argv[4]
+    mag     = sys.argv[2]
+    color     = sys.argv[3].split('-')
+
+    header = np.loadtxt(cmdfile,max_rows=1,dtype=str)
+    yplot     = np.where(header == mag)[0][0]
+    color1    = np.where(header == color[0])[0][0]
+    color2    = np.where(header == color[1])[0][0]
+    data = np.loadtxt(cmdfile,skiprows=1)
+    ymag    = data[:,yplot]
+    color   = data[:,color1] - data[:,color2]
+    plt.plot(color, ymag, color='red')
+
 plt.savefig('cmd.png')
 
 plt.cla()
