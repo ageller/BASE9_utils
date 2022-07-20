@@ -2,7 +2,7 @@
 
 from astroquery.gaia import Gaia
 from astropy.modeling import models, fitting
-from astropy.table import Table, Column
+from astropy.table import Table, Column, MaskedColumn
 import astropy.units as units
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
@@ -206,10 +206,12 @@ class GaiaClusterMembers(object):
 		if (self.verbose > 0):
 			print("Finding radial-velocity members ... ")
 		
+		self.data['radial_velocity'].fill_value = np.nan
 		x = self.data['radial_velocity']
+
 		
 		#1D histogram
-		hrv, brv = np.histogram(x, bins = self.RVbins, range=(self.RVmin, self.RVmax))
+		hrv, brv = np.histogram(x.filled(), bins = self.RVbins, range=(self.RVmin, self.RVmax))
 
 		#fit
 		RVguess = brv[np.argmax(hrv)]
@@ -224,7 +226,7 @@ class GaiaClusterMembers(object):
 			print(rvG1D.parameters)
 
 		if (self.createPlots):
-			hrv, brv = np.histogram(x, bins = self.RVbins, range=(self.RVmin, self.RVmax))
+			hrv, brv = np.histogram(x.filled(), bins = self.RVbins, range=(self.RVmin, self.RVmax))
 			xf = np.linspace(self.RVmin, self.RVmax, self.RVbins*10)
 			f, ax = plt.subplots()
 			ax.step(brv[:-1],hrv, color='black')
@@ -533,8 +535,16 @@ class GaiaClusterMembers(object):
 
 		# I'm not sure the best way to combine these
 		# We probably want to multiple them together, but if there is no membership (e.g., in RV), then we still keep the star
+		try:
+			self.data['PRV'].mask
+		except:
+			self.data['PRV'] = MaskedColumn(self.data['PRV'])
 		self.data['PRV'].fill_value = 1.
 		#self.data['PPa'].fill_value = 1.  # it appears that this is not a masked column
+		try:
+			self.data['PPM'].mask
+		except:
+			self.data['PPM'] = MaskedColumn(self.data['PPM'])
 		self.data['PPM'].fill_value = 1.
 
 		self.data['membership'] = np.nan_to_num(self.data['PRV'].filled(), nan=1)*\
@@ -558,8 +568,8 @@ class GaiaClusterMembers(object):
 
 		ax.set_ylim(22, 10)
 		ax.set_xlim(-1, 3)
-		ax.set_xlabel('(g_ps - i_ps)', fontsize=16)
-		ax.set_ylabel('g_ps', fontsize=16)
+		ax.set_xlabel(x1 + ' - ' + x2, fontsize=16)
+		ax.set_ylabel(y, fontsize=16)
 		if (savefig):
 			f.savefig(self.plotNameRoot + 'CMD.pdf', format='PDF', bbox_inches='tight')
 
