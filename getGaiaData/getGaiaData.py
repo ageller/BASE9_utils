@@ -2,7 +2,7 @@
 
 from astroquery.gaia import Gaia
 from astropy.modeling import models, fitting
-from astropy.table import Table, Column, MaskedColumn
+from astropy.table import Table, Column, MaskedColumn, vstack
 import astropy.units as units
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
@@ -458,7 +458,7 @@ class GaiaClusterMembers(object):
 			PMxguess = self.PMmean[0]
 		if (self.PMmean[1] is not None):
 			PMyguess = self.PMmean[1]
-		p_init = models.Gaussian2D(np.max(h2D.flatten()), PMxguess, PMyguess, 1, 1)\
+		p_init = models.Gaussian2D(np.max(h2D.flatten())/10., PMxguess, PMyguess, 1, 1)\
 				+ models.Gaussian2D(np.max(h2D.flatten()), 0, 0, 5, 5)
 		# p_init = models.Gaussian2D(np.max(h2D.flatten()), PMxguess, PMyguess, 1, 1)\
 		# 		+ models.Polynomial2D(degree = 2)
@@ -503,6 +503,15 @@ class GaiaClusterMembers(object):
 										   norm = mplColors.LogNorm(), cmap = cm.Greys)
 			ax2.contourf(x2D[:-1], y2D[:-1], pmG2D(xf, yf).T, cmap=cm.RdPu, bins = 20, \
 						 norm=mplColors.LogNorm(), alpha = 0.3)
+
+			# add in other members as a check
+			members = Table(names = self.data.colnames)
+			if ('PRV' in self.data.colnames):
+				members = vstack([members, self.data[np.logical_and(self.data['PRV'] > self.membershipMin, ~self.data['PRV'].mask)]])
+			if ('PPa' in self.data.colnames):
+				members = vstack([members, self.data[self.data['PPa'] > self.membershipMin]])
+
+			ax2.scatter(members['pmra'], members['pmdec'], color='cyan', marker='.')
 
 			ax1.set_xlim(self.PMxmin, self.PMxmax)
 			ax2.set_xlim(self.PMxmin, self.PMxmax)
@@ -566,7 +575,7 @@ class GaiaClusterMembers(object):
 		mask = (data[m] > self.membershipMin) 
 		ax.plot(data[mask][x1] - data[mask][x2], data[mask][y],'.', color='deeppink')
 
-		ax.set_ylim(22, 10)
+		ax.set_ylim(22, min(data[mask][y]))
 		ax.set_xlim(-1, 3)
 		ax.set_xlabel(x1 + ' - ' + x2, fontsize=16)
 		ax.set_ylabel(y, fontsize=16)
