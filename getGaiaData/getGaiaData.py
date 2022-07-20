@@ -604,7 +604,7 @@ class GaiaClusterMembers(object):
 		# If we want to include Gaia photometry, we need to include errors.  
 		# Maybe we can use "typical errors" from here: https://gea.esac.esa.int/archive/documentation/GEDR3/index.html
 		# add the extra columns for BASE-9
-		members['mass1'] = np.zeros(len(members)) #if we know masses, these could be added
+		members['mass1'] = np.zeros(len(members)) + 1.1 #if we know masses, these could be added
 		members['massRatio'] = np.zeros(len(members)) #if we know mass ratios, these could be added
 		members['stage1'] = np.zeros(len(members)) + 1 #set to 1 for MS and giant stars (use 2(?) for WDs)
 		members['useDBI'] = np.zeros(len(members)) + 1 #set to 1 to use during burn-in.  May want to improve to remove anomalous stars
