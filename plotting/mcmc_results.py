@@ -1,4 +1,4 @@
-#!/usr/bin/python3.8
+#!python
 
 ### output mcmc results to the screen
 

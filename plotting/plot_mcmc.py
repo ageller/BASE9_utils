@@ -1,4 +1,4 @@
-#!/usr/bin/python3.8
+#!python
 
 ### plot mcmc output of .res files, with distance, rather than parallax
 

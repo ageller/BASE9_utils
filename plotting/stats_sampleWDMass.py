@@ -1,4 +1,4 @@
-#!/usr/bin/python3.8
+#!python3
 
 ### output results of each sampleWDMass file to the screen
 

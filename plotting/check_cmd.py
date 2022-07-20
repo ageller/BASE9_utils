@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!python
 
 # check the CMD for a BASE-9 phot file
 
