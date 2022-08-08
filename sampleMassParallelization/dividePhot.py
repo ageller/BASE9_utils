@@ -15,6 +15,7 @@ import argparse
 import shutil
 import subprocess, sys, shlex
 
+
 def trim_res(resFile):
 
 	# save the original res file
@@ -42,13 +43,13 @@ def divide_phot(resFile, photFile, yamlFile, nThreads):
 	#   save the subset of the phot file 
 	#   copy the res file so that it has the same root file name as the phot file
 
-	# get the zfill amount
-	nfill = int(np.ceil(np.log10(nThreads)))
+	# # get the zfill amount
+	# nfill = int(np.ceil(np.log10(nThreads)))
 	# get the root file name from the phot file
 	fnameRoot = photFile.replace('.phot','')
 
 	for i,usedf in enumerate(split_df):
-		destRoot = fnameRoot + '_' + str(i).zfill(nfill)
+		destRoot = fnameRoot + '_' + str(i)#.zfill(nfill)
 
 		# save that phot file
 		destPhot = destRoot + '.phot'
@@ -65,6 +66,7 @@ def divide_phot(resFile, photFile, yamlFile, nThreads):
 
 def create_srun(nThreads, srunName, yamlFile, photFile, srunFile):
 	fnameRoot = photFile.replace('.phot','')
+
 
 	# create an jobarray script that can be used on Quest
 	cmd = ""
