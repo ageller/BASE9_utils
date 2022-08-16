@@ -772,23 +772,29 @@ class GaiaClusterMembers(object):
 		# NOTE: currently this code requires a column in the data labelled as 'membership'
 
 		# create the initial figure
-		TOOLS = "box_zoom, reset"
+		TOOLS = "box_zoom, reset, lasso_select, box_select"
 		p = figure(title = "",
 			tools = TOOLS, width = 500, height = 700,
 			x_range = xrng, y_range = yrng)
 
+		# set all useDBI = 0 to start
 		self.data['useDBI'] = [0]*len(self.data)
 
 		mask = (self.data['membership'] > self.membershipMin) 
+		membershipOrg = self.data['membership'] # in case I need to reset
 
-		sourcePhot = ColumnDataSource(data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag]))
-		# empty for now, but will be filled below in updateStatus
+		# add an index column so that I can map back to the original data
+		self.data['index'] = np.arange(0,len(self.data))
+
+		sourcePhot = ColumnDataSource(data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index']))
+
+		# empty for now, but will be filled below in updateUseDBI
 		sourcePhotSingles = ColumnDataSource(data = dict(x = [] , y = []))
 
 		# add the phot points to the plot
 		# Note: I could handle categorical color mapping with factor_cmap, but this does not seem to update in the callback when I change the status in sourcePhot (I removed status since this doesn't work)
 		# colorMapper = factor_cmap('status', palette = ['black', 'dodgerblue'], factors = ['unselected', 'selected'])
-		p.scatter(source = sourcePhot, x = 'x', y = 'y', alpha = 0.5, size = 3, marker = 'circle', color = 'black')
+		photRenderer = p.scatter(source = sourcePhot, x = 'x', y = 'y', alpha = 0.5, size = 3, marker = 'circle', color = 'black')
 		p.scatter(source = sourcePhotSingles, x = 'x', y = 'y', alpha = 0.75, size = 8, marker = 'circle', color = 'dodgerblue')
 
 		# add the PointDrawTool to allow users to draw points interactively
@@ -807,7 +813,7 @@ class GaiaClusterMembers(object):
 		# callback to update the single-star selection when a point is added or when the slider changes
 		# https://stackoverflow.com/questions/47177493/python-point-on-a-line-closest-to-third-point
 
-		def updateStatus(attr, old, new):
+		def updateUseDBI(attr, old, new):
 			if (len(newPoints.data['x']) > 1):
 				# define the user-drawn line using shapely
 				lne = shLs([ (x,y) for x,y in zip(newPoints.data['x'], newPoints.data['y']) ])
@@ -827,7 +833,7 @@ class GaiaClusterMembers(object):
 							data['x'].append(x)
 							data['y'].append(y)
 				sourcePhotSingles.data = data
-		newPoints.on_change('data', updateStatus)
+		newPoints.on_change('data', updateUseDBI)
 
 		###########################
 		# widgets
@@ -835,7 +841,7 @@ class GaiaClusterMembers(object):
 		# add a slider to define the width of the selection, next to the line
 		slider = Slider(start = 0, end = 0.1, value = 0.01, step = 0.001, format = '0.000', title = "Selection Region")
 		def sliderCallback(attr, old, new):
-			updateStatus(attr, old, new)
+			updateUseDBI(attr, old, new)
 		slider.on_change("value", sliderCallback)
 		
 		# add a reset button
@@ -843,15 +849,17 @@ class GaiaClusterMembers(object):
 
 		def resetCallback(event):
 			newPoints.data = dict(x = [], y = [])
-			slider.value = 0.1  
+			slider.value = 0.01  
 			self.data['useDBI'] = [0]*len(self.data)
-
+			self.data['membership'] = membershipOrg
+			mask = (self.data['membership'] > self.membershipMin)
+			sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
 		resetButton.on_click(resetCallback)
 
 		# text box to define the output file
 		# outfile = TextInput(value = datafile + '.new', title = "Output File Name:")
 
-		# add a button to apply the filter
+		# add a button to write the files
 		writeButton = Button(label = "Write .phot and .yaml files",  button_type = "success")
 
 		def writeCallback(event):
@@ -864,7 +872,20 @@ class GaiaClusterMembers(object):
 		writeButton.on_click(writeCallback)
 
 
+		# add a button to delete selected points
+		deleteButton = Button(label = "Delete selected points",  button_type = "warning")
 
+		def deleteCallback(event):
+			# set the membership to -1, redefine the mask, and remove them from the columnDataSource
+			if (len(sourcePhot.selected.indices) > 0):
+				self.data['membership'][sourcePhot.data['index'][sourcePhot.selected.indices]] = -1
+				mask = (self.data['membership'] > self.membershipMin)
+				sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
+				# reset
+				sourcePhot.selected.indices = []
+
+
+		deleteButton.on_click(deleteCallback)
 
 		###########################
 		# layout
@@ -872,6 +893,7 @@ class GaiaClusterMembers(object):
 		buttons = column(
 			slider, 
 			Div(text='<div style="height: 15px;"></div>'),
+			deleteButton,
 			#outfile,
 			writeButton,
 			Div(text='<div style="height: 15px;"></div>'),
@@ -879,10 +901,9 @@ class GaiaClusterMembers(object):
 		)
 		title = 	Div(text='<div style="font-size:20px; font-weight:bold">Interactive CMD</div>')
 		instructions = 	Div(text='<ul style="font-size:14px">\
-			<li>Add points that define a line along the single-star sequence.</li>\
-			<li>To add points, first enable the "Point Draw Tool".</li>\
-			<li>Click to create a marker.  Click+drag any marker to move it.  Click+backspace any marker to delete it.</li>\
-			<li>Click the "Reset" button to remove all the points. </li>\
+			<li>Use the lasso or box select tool to select stars that should be removed from the sample completely. Then click the "Delete selected points button"</li>\
+			<li>Add points that define a line along the single-star sequence.  To add points, first enable the "Point Draw Tool".  Then click on the plot to create a marker.  Click+drag any marker to move it.  Click+backspace any marker to delete it.</li>\
+			<li>Click the "Reset" button to remove all the points and reset the plot. </li>\
 			<li>When finished, click the "Apply Selection" button to select the single members.</li>\
 		</ul>')
 
