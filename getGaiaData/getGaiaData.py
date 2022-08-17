@@ -781,7 +781,7 @@ class GaiaClusterMembers(object):
 		self.data['useDBI'] = [0]*len(self.data)
 
 		mask = (self.data['membership'] > self.membershipMin) 
-		membershipOrg = self.data['membership'] # in case I need to reset
+		membershipOrg = self.data['membership'].data.copy() # in case I need to reset
 
 		# add an index column so that I can map back to the original data
 		self.data['index'] = np.arange(0,len(self.data))
@@ -878,12 +878,12 @@ class GaiaClusterMembers(object):
 		def deleteCallback(event):
 			# set the membership to -1, redefine the mask, and remove them from the columnDataSource
 			if (len(sourcePhot.selected.indices) > 0):
-				self.data['membership'][sourcePhot.data['index'][sourcePhot.selected.indices]] = -1
+				indices = sourcePhot.data['index'][sourcePhot.selected.indices]
+				self.data['membership'][indices] = -1
 				mask = (self.data['membership'] > self.membershipMin)
 				sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
 				# reset
 				sourcePhot.selected.indices = []
-
 
 		deleteButton.on_click(deleteCallback)
 
