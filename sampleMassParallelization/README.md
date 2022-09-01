@@ -8,3 +8,5 @@ Python script to :
 
 example command:
 ` python dividePhot.py --res ngc188.res --phot NGC_188.phot --yaml base9.yaml --nthreads 4 `
+
+## NOTE: This will trim your res file to only include stage 3.  You should make a copy of it to keep the original version.
