@@ -124,7 +124,7 @@ class GaiaClusterMembers(object):
 		self.RVmax = 100. #km/s
 		self.RVbins = 100
 		self.dmin = 0. #parsecs
-		self.dmax = 3000. #parsecs
+		self.dmax = 7000. #parsecs
 		self.dbins = 200
 		self.dPolyD = 6 #degrees for polynomial fit for distance distribution
 		self.PMxmin = -100 #mas/yr
@@ -237,7 +237,10 @@ class GaiaClusterMembers(object):
 			self.membershipMin = 0.001
 			membership = [x for x in data if x >= self.membershipMin]
 			if len(membership) < 100:
-				self.membershipMin = 0.00
+				self.membershipMin = 0.00001
+				membership = [x for x in data if x >= self.membershipMin]
+				if len(membership) < 50:
+					self.membershipMin = 1e-50
 		if len(membership) > 1e4:
 			self.membershipMin = 0.1
 
@@ -438,6 +441,7 @@ class GaiaClusterMembers(object):
 		self.PPa = Fc(x)/pa1D(x)
 		self.get_minMembership(self.PPa)
 		self.data['PPa'] = self.PPa
+
 	
 	def getM35PMMembers(self, savefig=True):
 		if (self.verbose > 0):
@@ -462,8 +466,8 @@ class GaiaClusterMembers(object):
 			sigmas = [tri_fitted_params[i] for i in [1,4,7]]
 			if 0.5 <= min(sigmas):
 				print('Zoomed')
-				left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/15])
-				right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/15]) #find range for fit
+				left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/50])
+				right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/50]) #find range for fit
 				hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))	
 				params = [brv[np.argmax(hrv)], 1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
 				fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
@@ -666,7 +670,6 @@ class GaiaClusterMembers(object):
 		#membership calculation
 		RA_mems = gauss(x, *x_params[0][:3])/tri_norm(x, *x_params[0])
 		DEC_mems = gauss(y, *y_params[0][:3])/tri_norm(y, *y_params[0])
-		print ('RA max, DEC max', max(RA_mems),max(DEC_mems))
 		self.PPM = np.array(RA_mems*DEC_mems)
 		self.data['PPM'] = self.PPM
 
