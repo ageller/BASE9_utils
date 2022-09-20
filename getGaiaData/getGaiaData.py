@@ -158,7 +158,7 @@ class GaiaClusterMembers(object):
 		# lists give [start, prior mean, prior sigma]
 		self.yamlInputDict = {
 			'photFile' : self.photOutputFileName,
-			'outputFileBase' : 'output/base9',
+			'outputFileBase' : None,
 			'modelDirectory' : '/projects/p31721/BASE9/base-models/',
 			'msRgbModel' : 5,
 			'Fe_H' : [0., 0.3, 0.3],
