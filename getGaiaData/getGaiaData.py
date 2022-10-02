@@ -693,6 +693,7 @@ class GaiaClusterMembers(object):
 			data = self.data
 
 		# I could specify the columns to use
+		print (x1,x2,y)
 		f, ax = plt.subplots(figsize=(5,8))
 		ax.plot(data[x1] - data[x2], data[y],'.', color='lightgray')
 
@@ -738,10 +739,11 @@ class GaiaClusterMembers(object):
 		# If we want to include Gaia photometry, we need to include errors.  
 		# Maybe we can use "typical errors" from here: https://gea.esac.esa.int/archive/documentation/GEDR3/index.html
 		# add the extra columns for BASE-9
-		members['mass1'] = np.zeros(len(members)) #if we know masses, these could be added
+		members['mass1'] = np.zeros(len(members)) + 1.1 #if we know masses, these could be added
 		members['massRatio'] = np.zeros(len(members)) #if we know mass ratios, these could be added
 		members['stage1'] = np.zeros(len(members)) + 1 #set to 1 for MS and giant stars (use 2(?) for WDs)
-		members['useDBI'] = np.zeros(len(members)) + 1 #set to 1 to use during burn-in.  May want to improve to remove anomalous stars
+		if ('useDBI' not in members.colnames):
+			members['useDBI'] = np.zeros(len(members)) + 1 #set to 1 to use during burn-in.  May want to improve to remove anomalous stars
 		out = members[['id', 
 					   'phot_g_mean_mag', 'phot_bp_mean_mag', 'phot_rp_mean_mag',
 					   'g_mean_psf_mag', 'r_mean_psf_mag', 'i_mean_psf_mag', 'z_mean_psf_mag', 'y_mean_psf_mag',
@@ -780,7 +782,7 @@ class GaiaClusterMembers(object):
 		for c in ['sigG', 'sigG_BP', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
 			out[c][(out[c] < self.photSigFloor)] = self.photSigFloor
 
-		# replace any nan or mask values with 99.9 for mag and -9.9 for sig
+		# replace any nan or mask values with -9.9 for sig, which BASE9 will ignore
 		for c in ['G', 'G_BP', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
 			out[c].fill_value = 99.9
 			out[c] = out[c].filled()
@@ -807,7 +809,7 @@ class GaiaClusterMembers(object):
 		# ffmt = '%-' + str(fdec + 3) + '.' + str(fdec) + 'f'
 		ffmt = '%-7.4f'
 		with open(filename, 'w', newline='\n') as f:
-			ascii.write(out, delimiter=' ', output=f, format = 'basic',
+			ascii.write(out, delimiter=' ', output=f, format = 'basic', overwrite=True,
 				formats = {'id': '%' + str(2*zfillN + 1) + 's', 
 						'G': ffmt, 'G_BP': ffmt, 'G_RP': ffmt, 
 						'g_ps': ffmt, 'r_ps': ffmt, 'i_ps': ffmt, 'z_ps': ffmt, 'y_ps': ffmt, 
@@ -874,6 +876,8 @@ class GaiaClusterMembers(object):
 		# This outputs in alphabetical order
 		with open(self.yamlOutputFileName, 'w') as file:
 			yaml.dump(yamlOutput, file, indent = 4)
+
+
 
 	def createInteractive(self, mag = 'G', color1 = 'G_BP', color2 = 'G_RP', xrng = [0.5,2], yrng = [20,10]):
 		# NOTE: currently this code requires a column in the data labelled as 'membership'
@@ -1019,6 +1023,7 @@ class GaiaClusterMembers(object):
 		return(layout)
 
 
+
 	def runAll(self, clusterName):
 		if clusterName == 'M_35':
 			self.radius = 2.*self.radius/3.
@@ -1033,6 +1038,8 @@ class GaiaClusterMembers(object):
 			self.getPMMembers(clusterName)
 		self.combineMemberships()
 		self.plotCMD(y = 'phot_g_mean_mag', x1 = 'phot_bp_mean_mag', x2 = 'phot_rp_mean_mag')
+		self.generatePhotFile()
+		self.generateYamlFile()
 
 		if (self.verbose > 0):
 			print("done.")
