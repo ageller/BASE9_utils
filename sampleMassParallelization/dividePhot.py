@@ -140,7 +140,7 @@ def define_args():
 if __name__ == "__main__":
 
 	args = define_args()
-	#trim_res(args.res)
+	trim_res(args.res)
 	divide_phot(args.res, args.phot, args.yaml, args.nthreads)
 	create_srun(args.nthreads, args.srunName, args.yaml, args.phot, args.srunFile)
 	print ('Ready to submit srun_array.sh')
