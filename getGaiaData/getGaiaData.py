@@ -1170,7 +1170,7 @@ class GaiaClusterMembers(object):
 		updateIsochroneButton.on_click(updateIsochroneCallback)
 
 
-		# add sliders to move the isochrone in mM and redenning
+		# add sliders to move the isochrone in mM and reddening
 		mMSlider = Slider(start = 0, end = 20, value = initialGuess[2], step = 0.01, format = '0.00', title = "Distance Modulus")
 		def mMSliderCallback(attr, old, new):
 			sourceCluster.data['distMod'] = [mMSlider.value]
@@ -1218,7 +1218,7 @@ class GaiaClusterMembers(object):
 		def writeCallback(event):
 			# output updated phot files
 			self.generatePhotFile()
-			
+
 			# update the yaml starting values and prior variances if necessary
 			print('initial and final yaml [starting, mean, sigma] values:')
 			keys = ['Fe_H', 'Av', 'distMod', 'logAge']
@@ -1264,7 +1264,7 @@ class GaiaClusterMembers(object):
 			<li>To delete points: select points with lasso or box select tool, and click the "Delete" button.</li>\
 			<li>Click the "Reset" button undo all delete actions. </li>\
 			<li>To change the isochrone, enter the age and FeH in the appropriate boxes, and click the "Update Isochrone" button.</li>\
-			<li>Move the isochrone to change the distance and redenning to better match the data.</li>\
+			<li>Move the isochrone to change the distance and reddening to better match the data.</li>\
 			<li>When finished, click the "Write files" button output the results.</li>\
 		</ul>')
 
