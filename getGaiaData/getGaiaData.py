@@ -1254,9 +1254,10 @@ class GaiaClusterMembers(object):
 			updateIsochroneButton,
 			mMSlider,
 			AvSlider,
+			Div(text='<div style="height: 40px;"></div>'),
 			deleteButton,
 			resetButton,
-			Div(text='<div style="height: 50px;"></div>'),
+			Div(text='<div style="height: 40px;"></div>'),
 			writeButton,
 		)
 		title = 	Div(text='<div style="font-size:20px; font-weight:bold">Interactive CMD</div>')
