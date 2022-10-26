@@ -16,13 +16,16 @@ import matplotlib.cm as cm
 import yaml
 from bokeh import *
 from bokeh.plotting import figure
-from bokeh.models import ColumnDataSource, Button, Div, PointDrawTool, Slider, TextInput
+from bokeh.models import ColumnDataSource, Button, PointDrawTool, Slider, TextInput, Div, Paragraph
 from bokeh.layouts import column, row
 from bokeh.io import curdoc
 from bokeh.transform import factor_cmap
-
 from shapely.geometry import LineString as shLs
 from shapely.geometry import Point as shPt
+from scipy.interpolate import interp1d, RegularGridInterpolator
+import pandas as pd
+from astropy.table import Table, join, hstack
+
 
 def gauss(x, mu, sigma, A):
 	return A*np.exp(-(x-mu)**2/2/sigma**2)
@@ -75,7 +78,7 @@ class GaiaClusterMembers(object):
 		self.yamlTemplateFileName = "template_base9.yaml" #default demplate for the yaml file
 
 		# maximum error that we will allow in a source to be retrieved (not sure what the best value is here)
-		self.maxPMerror = 5 # mas/year
+		self.maxPMerror = 1 # mas/year
 
 		# set to 1 or 2 to print out more (and even more) information
 		self.verbose = 0
@@ -137,13 +140,14 @@ class GaiaClusterMembers(object):
 		self.RVsigma = None
 		self.distance = None #could explicitly set the mean cluster distance for the initial guess
 		self.PMmean = [None, None] #could explicitly set the mean cluster PM for the initial guess
-		
+		self.r_tide = 0
+		self.r_core = 0
 		self.fitter = fitting.LevMarLSQFitter()
 
 		# minimum membership probability to include in the CMD
 		self.membershipMin = 0.01 
 
-		self.photSigFloor = 0.01 # floor to the photometry errors for the .phot file
+		self.photSigFloor = 0.015 # floor to the photometry errors for the .phot file
 
 		# output
 		self.SQLcmd = ''
@@ -152,6 +156,7 @@ class GaiaClusterMembers(object):
 		self.plotNameRoot = ''
 		self.photOutputFileName = 'input.phot'
 		self.yamlOutputFileName = 'base9.yaml'
+		self.saveDataFile ='data.ecsv'
 
 
 		# dict for yaml
@@ -163,11 +168,57 @@ class GaiaClusterMembers(object):
 			'msRgbModel' : 5,
 			'Fe_H' : [0., 0.3, 0.3],
 			'Av' : [0., 0.3, 0.3],
-			'Y' : [0.29, 0.0, 0.0],
-			'carbonicity' : [0.38, 0.0, 0.0],
 			'logAge' : [9., np.inf, np.inf],
 			'distMod' : [10., 1., 1.],
+			'Y' : [0.29, 0.0, 0.0],
+			'carbonicity' : [0.38, 0.0, 0.0]
 		}
+
+	# to rename the model, given Gaia phot columns
+		# for PARSEC models
+		self.magRenamer = {
+			'G':'phot_g_mean_mag',
+			'G_BP' :'phot_bp_mean_mag',
+			'G_RP':'phot_rp_mean_mag',
+			'g_ps':'g_mean_psf_mag',
+			'r_ps':'r_mean_psf_mag',
+			'i_ps':'i_mean_psf_mag',
+			'z_ps':'z_mean_psf_mag',
+			'y_ps':'y_mean_psf_mag',
+			'sigG':'phot_g_mean_mag_error',
+			'sigG_BP' :'phot_bp_mean_mag_error',
+			'sigG_RP':'phot_rp_mean_mag_error',
+			'sigg_ps':'g_mean_psf_mag_error',
+			'sigr_ps':'r_mean_psf_mag_error',
+			'sigi_ps':'i_mean_psf_mag_error',
+			'sigz_ps':'z_mean_psf_mag_error',
+			'sigy_ps':'y_mean_psf_mag_error',
+			'J_2M':'J_2M',
+			'H_2M':'H_2M',
+			'Ks_2M':'Ks_2M',
+			'sigJ_2M':'sigJ_2M',
+			'sigH_2M':'sigH_2M',
+			'sigKs_2M':'sigKs_2M',
+		}
+
+		# Redenning coefficients
+		# from BASE-9 Filters.cpp
+		absCoeffs0 = {
+			"G":      0.86105,
+			"G_BP":   1.07185,
+			"G_RP":   0.65069,
+			"g_ps":   1.16529,
+			"r_ps":   0.86813,
+			"i_ps":   0.67659,
+			"z_ps":   0.51743,
+			"y_ps":   0.43092,
+			"J_2M":   0.29434,
+			"H_2M":   0.18128,
+			"Ks_2M":  0.11838,
+		}
+		self.absCoeffs = {}
+		for key, value in absCoeffs0.items():
+			self.absCoeffs[self.magRenamer[key]] = value
 
 
 
@@ -219,7 +270,6 @@ class GaiaClusterMembers(object):
 
 		if (self.verbose > 0):
 			print(f"Saving data to file {filename} ... ")
-
 		self.data.write(filename, overwrite=True)  
 
 	def readDataFromFile(self, filename=None):
@@ -230,21 +280,66 @@ class GaiaClusterMembers(object):
 		if (self.verbose > 0):
 			print(f"Reading data from file {filename} ... ")
 
-		self.data = ascii.read(filename)  		
+		self.data = ascii.read(filename)  
+		#self.data  = Table(self.data, masked=True, copy=False)		
+
 	def get_minMembership(self,data):
 		membership = [x for x in data if x >= self.membershipMin]
-		if len(membership) < 500:
+		if len(membership) < 200:
 			self.membershipMin = 0.001
 			membership = [x for x in data if x >= self.membershipMin]
-			if len(membership) < 100:
-				self.membershipMin = 0.00001
-				membership = [x for x in data if x >= self.membershipMin]
-				if len(membership) < 50:
-					self.membershipMin = 1e-50
-		if len(membership) > 1e4:
-			self.membershipMin = 0.1
+			# if len(membership) < 100:
+			# 	self.membershipMin = 0.00001
+			# 	membership = [x for x in data if x >= self.membershipMin]
+			# 	if len(membership) < 50:
+			# 		self.membershipMin = 1e-50
 
-	def getRVMembers(self, savefig=True):
+	def get_coreRadius(self, rt):
+		mask = (self.data['membership'] > self.membershipMin)
+		members = self.data[mask]
+		center = SkyCoord(self.RA*units.degree, self.Dec*units.degree, frame='icrs')
+		members['coord'] = SkyCoord(members['ra'], members['dec'], frame='icrs') 
+		members['rCenter'] = center.separation(members['coord']).to(units.arcmin)
+		
+		# get the histogram of radial values
+		# set the radial bins (in arcmin)
+		bins = np.linspace(0, 60, 50)
+
+		# calculate the bin centers
+		bin_centers = bins[:-1] + np.diff(bins)[0]
+
+		# get the radial histogram (number in each bin)
+		nr,br = np.histogram(members['rCenter'],bins = bins)
+
+		# calculate the surface areas
+		sarea = np.array([bins[i+1]**2. - bins[i]**2. for i in range(len(bins) - 1)])
+
+		# calculate the surface density (N/area)
+		sdensity = nr/sarea
+
+		# calculate the uncertainty on the surface density (using propagation of errors and assuming zero uncertainty on the surface area)
+		err_sdensity = np.sqrt(nr)/sarea
+
+		# make sure that the errors are always non-zero (not sure the best approach here)
+		xx = np.where(err_sdensity == 0)
+		err_sdensity[xx] = 1./sarea[xx]
+				# fit a King model
+		p_init = models.KingProjectedAnalytic1D(max(sdensity), np.median(bin_centers), rt)
+		fit_p = self.fitter
+		king = fit_p(p_init, bin_centers, sdensity, weights = 1.0/err_sdensity)
+
+		# get the parameters and the uncertainties
+		# https://github.com/astropy/astropy/issues/7202
+		param_names = king.param_names
+		params = king.parameters
+		err_params = np.sqrt(np.diag(fit_p.fit_info['param_cov']))
+		print('fit parameters :')
+		for (x1,x2,x3) in zip(param_names, params, err_params):
+			print(f'{x1} = {x2:.3} +/- {x3:.3}')
+		self.r_core = params[1]/60. #convert from arcmin to deg
+		self.r_tide = params[2]/60.
+
+	def getRVMembers(self, clusterName, savefig=True):
 		# calculate radial-velocity memberships
 		if (self.verbose > 0):
 			print("Finding radial-velocity members ... ")
@@ -268,7 +363,8 @@ class GaiaClusterMembers(object):
 		if (self.verbose > 1):
 			print(rvG1D)
 			print(rvG1D.parameters)
-
+		if clusterName == 'M_35':
+			rvG1D.parameters = [23.62842185, 25.31086499,  2.771733,   38.34134755,  6.28088832, 30.03207677]
 		if (self.createPlots):
 			hrv, brv = np.histogram(x.filled(), bins = self.RVbins, range=(self.RVmin, self.RVmax))
 			xf = np.linspace(self.RVmin, self.RVmax, self.RVbins*10)
@@ -292,6 +388,7 @@ class GaiaClusterMembers(object):
 		self.PRV = Fc(x)/rvG1D(x)
 		self.get_minMembership(self.PRV)
 		self.data['PRV'] = self.PRV
+
 
 	def getPMRAmembers(self, savefig=True):
 		if (self.verbose > 0):
@@ -396,7 +493,7 @@ class GaiaClusterMembers(object):
 			ax.plot(xf,bi_norm(xf, *tri_fitted_params[3:]), color='darkslateblue', ls='dashed')
 
 
-	def getParallaxMembers(self, savefig=True):
+	def getParallaxMembers(self, clusterName, savefig=True):
 		# estimate memberships based on distance (could use Bailer Jones, but this simply uses inverted parallax)
 		if (self.verbose > 0):
 			print("Finding parallax members ... ")
@@ -417,7 +514,8 @@ class GaiaClusterMembers(object):
 		if (self.verbose > 1):
 			print(pa1D)
 			print(pa1D.parameters)
-
+		if clusterName == 'M_35':
+			pa1D.parameters = [ 4.26940535e+02,  8.49163992e+02,  4.03301980e+01, -5.54543195e+01, 5.97572873e-01, -4.00939709e-04,  1.21082486e-07, -1.95796276e-11, 1.64371784e-15, -5.61049975e-20]
 		if (self.createPlots):
 			hpa, bpa = np.histogram(x, bins = self.dbins, range=(self.dmin, self.dmax))
 			xf = np.linspace(self.dmin, self.dmax, self.dbins*10)
@@ -447,7 +545,7 @@ class GaiaClusterMembers(object):
 		if (self.verbose > 0):
 			print("finding proper-motion members ...")
 
-		def getPMparams(x):
+		def getPMparams(x, left, right):
 			#1D histogram
 			hrv1, brv1 = np.histogram(x, bins = self.PMxbins, range=(self.PMxmin, self.PMxmax))
 			max_peak = brv1[np.argmax(hrv1)]
@@ -501,8 +599,14 @@ class GaiaClusterMembers(object):
 		
 		x = self.data['pmra']
 		y = self.data['pmdec']
-		x_params = getPMparams(x)
-		y_params = getPMparams(y)
+		#x_params = getPMparams(x, 0, 4)
+		#y_params = getPMparams(y,-5, -1.5)
+		x_params = ([ 2.14554816e+00,  3.15415350e-01,  1.43725977e+02, -1.84327137e-01,
+		1.38119881e-01,  8.82605507e+01,  3.08773023e-01,  7.27310972e-01,
+		2.68756236e+03,  5.27204785e-01,  2.00172830e+00,  1.75295735e+03], -4.0, 4.0)
+		y_params = ([-2.98155723e+00,  2.15189164e-01,  6.01165304e+01, -1.99652011e+00,
+		1.23128364e-01,  1.01575910e+02, -1.46901709e+00,  1.06047625e+00,
+		1.13759993e+03, -3.11615648e+00,  2.61525329e+00,  4.19396516e+02], -8.0, 2.0)
 		PMxmin=x_params[1]
 		PMxmax=x_params[2]
 		PMymin=y_params[1]
@@ -532,8 +636,8 @@ class GaiaClusterMembers(object):
 			yf = np.linspace(PMymin,PMymax,200)
 			ax3.step(hy1D, y1D[:-1], color='black')
 			ax3.plot(quad_norm(yf, *y_params[0]),yf, color='deeppink', lw=3)
-			ax3.plot(gauss(yf, *y_params[0][:3]),yf, color='gray')
-			ax3.plot(tri_norm(yf, *y_params[0][3:]),yf, color='darkslateblue', ls='dashed')
+			ax3.plot(gauss(yf, *y_params[0][9:12]),yf, color='gray')
+			ax3.plot(tri_norm(yf, *y_params[0][:9]),yf, color='darkslateblue', ls='dashed')
 			ax3.axhline(y_params[0][0],color='tab:purple', ls='dotted')
 			ax3.annotate(r'$\mu_\alpha$ =' + f'{y_params[0][0]:.1f}' + r'mas yr$^{-1}$',(0.95*max(hy1D), y_params[0][0] + 0.05*(y_params[2] - y_params[1])), rotation=90)
 			ax3.set_xlim(-.05*max(hy1D),max(hy1D)+.1*max(hy1D))
@@ -557,8 +661,9 @@ class GaiaClusterMembers(object):
 
 		#membership calculation
 		RA_mems = gauss(x, *x_params[0][:3])/quad_norm(x, *x_params[0])
-		DEC_mems = gauss(y, *y_params[0][:3])/quad_norm(y, *y_params[0])
+		DEC_mems = gauss(y, *y_params[0][9:12])/quad_norm(y, *y_params[0])
 		self.PPM = np.array(RA_mems*DEC_mems)
+		self.get_minMembership(self.PPM)
 		self.data['PPM'] = self.PPM
 
 	def getPMMembers(self, savefig=True):
@@ -671,6 +776,7 @@ class GaiaClusterMembers(object):
 		RA_mems = gauss(x, *x_params[0][:3])/tri_norm(x, *x_params[0])
 		DEC_mems = gauss(y, *y_params[0][:3])/tri_norm(y, *y_params[0])
 		self.PPM = np.array(RA_mems*DEC_mems)
+		self.get_minMembership(self.PPM)
 		self.data['PPM'] = self.PPM
 
 	def combineMemberships(self):
@@ -682,7 +788,7 @@ class GaiaClusterMembers(object):
 		#self.data['PPa'].fill_value = 1.  # it appears that this is not a masked column
 		self.data['PPM'].fill_value = 1.
 		self.data['membership'] = np.nan_to_num(self.data['PRV'].filled(), nan=1)*\
-								  np.nan_to_num(self.data['PPa'], nan=1)*\
+								  np.nan_to_num(self.data['PPa'], nan=1) *\
 								  np.nan_to_num(self.data['PPM'], nan=1)
 
 	def plotCMD(self, data=None, x1='g_mean_psf_mag', x2='i_mean_psf_mag', y='g_mean_psf_mag', m='membership', savefig=True):
@@ -693,7 +799,6 @@ class GaiaClusterMembers(object):
 			data = self.data
 
 		# I could specify the columns to use
-		print (x1,x2,y)
 		f, ax = plt.subplots(figsize=(5,8))
 		ax.plot(data[x1] - data[x2], data[y],'.', color='lightgray')
 
@@ -708,6 +813,26 @@ class GaiaClusterMembers(object):
 		if (savefig):
 			f.savefig(self.plotNameRoot + 'CMD.pdf', format='PDF', bbox_inches='tight')
 
+	def addBASE9IDs(self):
+		# sort the data by distance from the (user defined) center and also by magnitude to generate IDs
+		center = SkyCoord(self.RA*units.degree, self.Dec*units.degree, frame='icrs')
+		self.data['coord'] = SkyCoord(self.data['ra'], self.data['dec'], frame='icrs') 
+		self.data['rCenter'] = center.separation(self.data['coord'])
+		# create 10 annuli to help with IDs?
+		# self.data['annulus'] = (np.around(self.data['rCenter'].to(units.deg).value, decimals = 1)*10 + 1).astype(int)
+		# add indices for the radii from the center and g mag for IDs
+		self.data.sort(['rCenter'])
+		self.data['rRank'] = np.arange(0,len(self.data)) + 1
+		self.data.sort(['phot_g_mean_mag'])
+		self.data['gRank'] = np.arange(0,len(self.data)) + 1
+		epoch = 1
+		zfillN = int(np.ceil(np.log10(len(self.data))))
+		self.data['id'] = [int(str(epoch) + str(r).zfill(zfillN) + str(g).zfill(zfillN)) for (r,g) in zip(self.data['rRank'].value, self.data['gRank'].value) ]
+		#self.data['id'] = self.data['source_id']
+
+		self.data.remove_columns(['coord', 'gRank', 'rRank', 'rCenter'])
+
+
 	def generatePhotFile(self):
 		if (self.verbose > 0):
 			print("generating phot file ...")
@@ -718,21 +843,6 @@ class GaiaClusterMembers(object):
 		# take only those that pass the membership threshold
 		mask = (self.data['membership'] > self.membershipMin) 
 		members = self.data[mask]
-
-		# sort the data by distance from the (user defined) center and also by magnitude to generate IDs
-		center = SkyCoord(self.RA*units.degree, self.Dec*units.degree, frame='icrs')
-		members['coord'] = SkyCoord(members['ra'], members['dec'], frame='icrs') 
-		members['rCenter'] = center.separation(members['coord'])
-		# create 10 annuli to help with IDs?
-		# members['annulus'] = (np.around(members['rCenter'].to(units.deg).value, decimals = 1)*10 + 1).astype(int)
-		# add indices for the radii from the center and g mag for IDs
-		members.sort(['rCenter'])
-		members['rRank'] = np.arange(0,len(members)) + 1
-		members.sort(['phot_g_mean_mag'])
-		members['gRank'] = np.arange(0,len(members)) + 1
-		epoch = 1
-		zfillN = int(np.ceil(np.log10(len(members))))
-		members['id'] = [str(epoch) + str(r).zfill(zfillN) + str(g).zfill(zfillN) for (r,g) in zip(members['rRank'].value, members['gRank'].value) ]
 
 		# include only the columns we need in the output table.
 		# Currently I am not including Gaia photometry
@@ -784,7 +894,7 @@ class GaiaClusterMembers(object):
 
 		# replace any nan or mask values with -9.9 for sig, which BASE9 will ignore
 		for c in ['G', 'G_BP', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
-			out[c].fill_value = 99.9
+			out[c].fill_value = 99.9			
 			out[c] = out[c].filled()
 		for c in ['sigG', 'sigG_BP', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
 			out[c].fill_value = -9.9
@@ -820,6 +930,7 @@ class GaiaClusterMembers(object):
 						'mass1': '%-5.3f', 'massRatio': '%-5.3f', 'stage1': '%1i','CMprior': '%-5.3f','useDBI': '%1d'
 						}
 				)
+
 
 	def generateYamlFile(self):
 		if (self.verbose > 0):
@@ -878,8 +989,7 @@ class GaiaClusterMembers(object):
 			yaml.dump(yamlOutput, file, indent = 4)
 
 
-
-	def createInteractive(self, mag = 'G', color1 = 'G_BP', color2 = 'G_RP', xrng = [0.5,2], yrng = [20,10]):
+	def createInteractiveCMD(self, mag = 'G', color1 = 'G_BP', color2 = 'G_RP', xrng = [0.5,2], yrng = [20,10]):
 		# NOTE: currently this code requires a column in the data labelled as 'membership'
 
 		# create the initial figure
@@ -889,16 +999,13 @@ class GaiaClusterMembers(object):
 			x_range = xrng, y_range = yrng)
 
 		# set all useDBI = 0 to start
-		self.data['useDBI'] = [0]*len(self.data)
-
+		self.data['useDBI'] = [1]*len(self.data)
 		mask = (self.data['membership'] > self.membershipMin) 
 		membershipOrg = self.data['membership'].data.copy() # in case I need to reset
-
 		# add an index column so that I can map back to the original data
 		self.data['index'] = np.arange(0,len(self.data))
 
 		sourcePhot = ColumnDataSource(data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index']))
-
 		# empty for now, but will be filled below in updateUseDBI
 		sourcePhotSingles = ColumnDataSource(data = dict(x = [] , y = []))
 
@@ -911,6 +1018,7 @@ class GaiaClusterMembers(object):
 		# add the PointDrawTool to allow users to draw points interactively
 		# to hold the user-added points
 		newPoints = ColumnDataSource(data = dict(x = [], y = []))   
+
 		renderer = p.circle(source = newPoints, x = 'x', y = 'y', color = 'limegreen', size = 10) 
 		drawTool = PointDrawTool(renderers = [renderer])
 		p.add_tools(drawTool)
@@ -918,8 +1026,6 @@ class GaiaClusterMembers(object):
 
 		# add the line connecting the user-added points
 		p.line(source = newPoints, x = 'x', y = 'y', color = 'limegreen', width = 4)
-
-		# add filled polygon to hold the region within the selection zone for the plot
 
 		# callback to update the single-star selection when a point is added or when the slider changes
 		# https://stackoverflow.com/questions/47177493/python-point-on-a-line-closest-to-third-point
@@ -946,7 +1052,7 @@ class GaiaClusterMembers(object):
 				sourcePhotSingles.data = data
 		newPoints.on_change('data', updateUseDBI)
 
-		###########################
+		##########################
 		# widgets
 
 		# add a slider to define the width of the selection, next to the line
@@ -954,10 +1060,8 @@ class GaiaClusterMembers(object):
 		def sliderCallback(attr, old, new):
 			updateUseDBI(attr, old, new)
 		slider.on_change("value", sliderCallback)
-		
 		# add a reset button
 		resetButton = Button(label = "Reset",  button_type = "danger", )
-
 		def resetCallback(event):
 			newPoints.data = dict(x = [], y = [])
 			slider.value = 0.01  
@@ -998,12 +1102,12 @@ class GaiaClusterMembers(object):
 
 		deleteButton.on_click(deleteCallback)
 
-		###########################
+		##########################
 		# layout
 		# plot on the left, buttons on the right
 		buttons = column(
 			slider, 
-			Div(text='<div style="height: 15px;"></div>'),
+			#Div(text='<div style="height: 15px;"></div>'),
 			deleteButton,
 			#outfile,
 			writeButton,
@@ -1019,24 +1123,352 @@ class GaiaClusterMembers(object):
 		</ul>')
 
 		layout = column(title, instructions, row(p, buttons))
+		return(layout)
+
+#####################################
+	### For the interactive isochrone ###
+	#####################################
+	def getModelGrid(self, isochroneFile):
+		# get the model grid space [age, FeH] from the model file
+
+		FeH = -99.
+		age = -99.
+		i = 0
+		with open(isochroneFile, 'r') as f:
+			for line in f:
+				if line.startswith('%s'):
+					x = line.replace('=',' ').split()
+					FeH = float(x[2])
+				if line.startswith('%a'):
+					x = line.replace('=',' ').split()
+					age = float(x[2])
+
+				if (FeH != -99 and age != -99):
+					if (line.startswith('%s') or line.startswith('%a')):
+						if (i == 0):
+							grid = np.array([age, FeH])
+						else:
+							grid = np.vstack((grid, [age, FeH]))
+						i += 1
+
+		return grid
+
+
+	def interpolateModel(self, age, FeH, isochroneFile, mag = 'phot_g_mean_mag', color1 = 'phot_bp_mean_mag', color2 = 'phot_rp_mean_mag'):
+		# perform a linear interpolation in the model grid between the closest points
+
+
+
+		# get the model grid
+		grid = self.getModelGrid(isochroneFile)
+
+		# check that the age and Fe/H values are within the grid 
+		ageGrid = np.sort(np.unique(grid[:,0]))
+		FeHGrid = np.sort(np.unique(grid[:,1]))
+		maxAge = np.max(ageGrid)
+		minAge = np.min(ageGrid)
+		maxFeH = np.max(FeHGrid)
+		minFeH = np.min(FeHGrid)
+
+		try:
+			# find the 4 nearest age and Fe/H values
+			iAge0 = np.where(ageGrid < age)[0][-1]
+			age0 = ageGrid[iAge0]
+			age1 = age0
+			if (iAge0 + 1 < len(ageGrid)):
+				age1 = ageGrid[iAge0 + 1]
+
+			iFeH0 = np.where(FeHGrid < FeH)[0][-1]
+			FeH0 = FeHGrid[iFeH0]
+			FeH1 = FeH0
+			if (iFeH0 + 1< len(FeHGrid)):
+				FeH1 = FeHGrid[iFeH0 + 1]
+
+			# read in those parts of the isochrone file
+			inAge = False
+			inFeH = False
+			arrS = []
+			columns = ''
+			testFeH = '-99'
+			testAge = '-99'
+			with open(isochroneFile, 'r') as f:
+				for line in f:
+					if (inAge and inFeH and not line.startswith('%') and not line.startswith('#')):
+						key = '[' + testAge + ',' + testFeH + ']'
+						x = line.strip() + ' ' + testAge + ' ' + testFeH
+						arrS.append(x.split())
+					if line.startswith('%s'):
+						inFeH = False
+						x = line.replace('=',' ').split()
+						testFeH = x[2]
+						if (float(testFeH) == FeH0 or float(testFeH) == FeH1):
+							inFeH = True
+					if line.startswith('%a'):
+						inAge = False
+						x = line.replace('=',' ').split()
+						testAge = x[2]
+						if (float(testAge) == age0 or float(testAge) == age1):
+							inAge = True
+					if (line.startswith('# EEP')):
+						x = line.replace('# ','') + ' logAge' + ' Fe_H'
+						columns = x.split()
+
+			# convert this to a pandas dataframe 
+			df = pd.DataFrame(arrS, columns = columns, dtype = float)
+			df.rename(columns = self.magRenamer, inplace = True)
+
+			# take only the columns that we need
+			# We cannot interpolate on mass since that is not unique and not strictly ascedning
+			# Ideally we would interpolate on initial mass, but that is not included in the BASE-9 model files
+			# I will interpolate on EEP, which I *think* is a number that is unique for each star 
+			df = df[np.unique(['EEP', mag, color1, color2, 'logAge','Fe_H'])]
+			ages = df['logAge'].unique()
+			FeHs = df['Fe_H'].unique()
+			EEPs = df['EEP'].unique()
+
+			# initialize the output dataframe
+			results = Table()
+
+			# create an array to interpolate on
+			# https://stackoverflow.com/questions/30056577/correct-usage-of-scipy-interpolate-regulargridinterpolator
+			pts = (ages, FeHs, EEPs)
+			for arr in np.unique([mag, color1, color2]):
+				val_size = list(map(lambda q: q.shape[0], pts))
+				vals = np.zeros(val_size)
+				for i, a in enumerate(ages):
+					for j, f in enumerate(FeHs):
+						df0 = df.loc[(df['logAge'] == a) & (df['Fe_H'] == f)]
+						interp = interp1d(df0['EEP'], df0[arr], bounds_error = False)
+						vals[i,j,:] = interp(EEPs)
+
+				interpolator = RegularGridInterpolator(pts, vals)
+				results[arr] = interpolator((age, FeH, EEPs))
+
+
+			return results
+
+		except:
+			print(f"!!! ERROR: could not interpolate isochrone.  Values are likely outside of model grid !!!\nage : {age} [{minAge}, {maxAge}]\nFeH: {FeH} [{minFeH}, {maxFeH}]")
+			return None
+
+
+	def createInteractiveIsochrone(self, isochroneFile, initialGuess = [4, 0, 0, 0], mag = 'phot_g_mean_mag', color1 = 'phot_bp_mean_mag', color2 = 'phot_rp_mean_mag', xrng = [0.5,2], yrng = [20,10], yamlSigmaFactor = 2.0):
+		'''
+		To run this in a Jupyter notebook (intended purpose):
+		--------------------
+		layout = createInteractiveIsochrone('isochrone.model', [log10(age), FeH, mM, Av])
+		def bkapp(doc):
+			doc.add_root(layout)
+		show(bkapp)
+		'''
+
+		###########################
+
+
+		# create the initial figure
+		TOOLS = "box_zoom, reset, lasso_select, box_select"
+		p = figure(title = "",
+			tools = TOOLS, width = 500, height = 700,
+			x_range = xrng, y_range = yrng)
+
+
+		mask = (self.data['membership'] > self.membershipMin) 
+		membershipOrg = self.data['membership'].data.copy() # in case I need to reset
+
+		# add an index column so that I can map back to the original data
+		self.data['index'] = np.arange(0, len(self.data))
+
+		# get the isochrone at the desired age and metallicity
+		iso = self.interpolateModel(initialGuess[0], initialGuess[1], isochroneFile, mag = mag, color1 = color1, color2 = color2)
+
+		# convert to observed mags given distance modulus and Av for these filters
+		# taken from BASE-9 Star.cpp
+		# abs is input Av
+		# distance is input distance modulus
+		# combinedMags[f] += distance;
+		# combinedMags[f] += (evoModels.absCoeffs[f] - 1.0) * clust.abs;
+		def offsetMag(magVal, magCol, mM, Av):
+			return magVal + mM + (self.absCoeffs[magCol] - 1.)*Av
+
+		def getObsIsochrone(iso, mM, Av):
+			color1Obs = offsetMag(iso[color1], color1, mM, Av)
+			color2Obs = offsetMag(iso[color2], color2, mM, Av)
+			magObs = offsetMag(iso[mag], mag, mM, Av)
+			return {'x': color1Obs - color2Obs, 'y': magObs, color1: iso[color1], color2: iso[color2], mag: iso[mag]}
+
+
+
+		# define the input for Bokeh
+		sourcePhot = ColumnDataSource(data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index']))
+		sourceCluster = ColumnDataSource(data = dict(logAge = [initialGuess[0]], Fe_H = [initialGuess[1]], distMod = [initialGuess[2]], Av = [initialGuess[3]]))
+		sourceIso = ColumnDataSource(getObsIsochrone(iso, sourceCluster.data['distMod'][0], sourceCluster.data['Av'][0]))
+
+		# add the photometry and isochrone to the plot
+		photRenderer = p.scatter(source = sourcePhot, x = 'x', y = 'y', alpha = 0.5, size = 3, marker = 'circle', color = 'black')
+		isoRenderer =  p.scatter(source = sourceIso, x = 'x', y = 'y', color = 'red', size = 5)
+
+
+		###########################
+		# widgets
+
+		# text boxes to define the age and FeH value for the isochrone
+		# adding a bit of extra code to make the label and input side-by-side
+		ageInput = TextInput(value = str(10.**initialGuess[0]/1.e6), title = '')
+		ageInputTitle = Paragraph(text = 'age [Myr]:', align = 'center', width = 60)
+		ageInputLayout = row([ageInputTitle, ageInput])
+		FeHInput = TextInput(value = str(initialGuess[1]), title = '')
+		FeHInputTitle = Paragraph(text = '[Fe/H]:', align = 'center', width = 60)
+		FeHInputLayout = row([FeHInputTitle, FeHInput])
+
+		# botton to update the isochrone
+		updateIsochroneButton = Button(label = "Update isochrone",  button_type = "success")
+		def updateIsochroneCallback(event):
+			iso = self.interpolateModel(np.log10(float(ageInput.value)*1e6), float(FeHInput.value), isochroneFile, mag = mag, color1 = color1, color2 = color2)
+			if (iso is not None):
+				sourceCluster.data['logAge'] = [np.log10(float(ageInput.value)*1e6)]
+				sourceCluster.data['Fe_H'] = [float(FeHInput.value)]
+				sourceIso.data = getObsIsochrone(iso, sourceCluster.data['distMod'][0], sourceCluster.data['Av'][0])
+			else:
+				ageInput.value = str(10.**sourceCluster.data['logAge'][0]/1.e6)
+				FeHInput.value = str(sourceCluster.data['Fe_H'][0])
+		updateIsochroneButton.on_click(updateIsochroneCallback)
+
+
+		# add sliders to move the isochrone in mM and redenning
+		mMSlider = Slider(start = 0, end = 20, value = initialGuess[2], step = 0.01, format = '0.00', title = "Distance Modulus")
+		def mMSliderCallback(attr, old, new):
+			sourceCluster.data['distMod'] = [mMSlider.value]
+			iso = sourceIso.data
+			sourceIso.data = getObsIsochrone(iso, sourceCluster.data['distMod'][0], sourceCluster.data['Av'][0])
+		mMSlider.on_change("value", mMSliderCallback)
+
+		AvSlider = Slider(start = 0, end = 3, value = initialGuess[3], step = 0.001, format = '0.000', title = "Av")
+		def AvSliderCallback(attr, old, new):
+			sourceCluster.data['Av'] = [AvSlider.value]
+			iso = sourceIso.data
+			sourceIso.data = getObsIsochrone(iso, sourceCluster.data['distMod'][0], sourceCluster.data['Av'][0])
+		AvSlider.on_change("value", AvSliderCallback)
+
+
+		# add a button to delete selected points
+		deleteButton = Button(label = "Delete selected points",  button_type = "danger")
+
+		def deleteCallback(event):
+			# set the membership to -1, redefine the mask, and remove them from the columnDataSource
+			if (len(sourcePhot.selected.indices) > 0):
+				indices = sourcePhot.data['index'][sourcePhot.selected.indices]
+				self.data['membership'][indices] = -1
+				mask = (self.data['membership'] > self.membershipMin)
+				sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
+				# reset
+				sourcePhot.selected.indices = []
+
+		deleteButton.on_click(deleteCallback)
+
+		# add a reset button
+		resetButton = Button(label = "Reset",  button_type = "warning", )
+
+		def resetCallback(event):
+			self.data['membership'] = membershipOrg
+			mask = (self.data['membership'] > self.membershipMin)
+			sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
+
+		resetButton.on_click(resetCallback)
+
+
+		# add a button to write the files
+		writeButton = Button(label = "Write .phot and .yaml files",  button_type = "success")
+
+		def writeCallback(event):
+			# output updated phot files
+			self.generatePhotFile()
+
+			# update the yaml starting values and prior variances if necessary
+			print('initial and final yaml [starting, mean, sigma] values:')
+			keys = ['Fe_H', 'Av', 'distMod', 'logAge']
+			for k in keys:
+				# initial values
+				init = self.yamlInputDict[k].copy()
+				self.yamlInputDict[k][0] = sourceCluster.data[k][0]
+
+				#variances
+				mean = self.yamlInputDict[k][1]
+				sig = self.yamlInputDict[k][2]
+				val = sourceCluster.data[k][0]
+				minVal = mean - sig
+				maxVal = mean + sig
+				if (val <= minVal or val >= maxVal):
+					diff = abs(val - mean)
+					self.yamlInputDict[k][2] = yamlSigmaFactor*diff
+
+				print(f'{k}: initial = {init}, final = {self.yamlInputDict[k]}')
+				if np.abs(val-mean) > sig:
+					print ('WARNING:',k,' sig value too small.  Increasing by 1.')
+					self.yamlInputDict[k][2] += 1
+			self.generateYamlFile()
+			print('Files saved : ', self.photOutputFileName, self.yamlOutputFileName) 
+
+		writeButton.on_click(writeCallback)
+		###########################
+		# layout
+		# plot on the left, buttons on the right
+
+
+		buttons = column(
+			Div(text='<div style="height: 15px;"></div>'),
+			ageInputLayout,
+			FeHInputLayout,
+			updateIsochroneButton,
+			mMSlider,
+			AvSlider,
+			deleteButton,
+			resetButton,
+			Div(text='<div style="height: 50px;"></div>'),
+			writeButton,
+		)
+		title = 	Div(text='<div style="font-size:20px; font-weight:bold">Interactive CMD</div>')
+		instructions = 	Div(text='<ul style="font-size:14px">\
+			<li>To delete points: select points with lasso or box select tool, and click the "Delete" button.</li>\
+			<li>Click the "Reset" button undo all delete actions. </li>\
+			<li>To change the isochrone, enter the age and FeH in the appropriate boxes, and click the "Update Isochrone" button.</li>\
+			<li>Move the isochrone to change the distance and redenning to better match the data.</li>\
+			<li>When finished, click the "Write files" button output the results.</li>\
+		</ul>')
+
+		layout = column(title, instructions, row(p, buttons))
 
 		return(layout)
 
 
-
-	def runAll(self, clusterName):
-		if clusterName == 'M_35':
-			self.radius = 2.*self.radius/3.
-			self.getData()
-			self.getRVMembers()
-			self.getParallaxMembers()
-			self.getM35PMMembers(clusterName)
+	def runAll(self, clusterName, rt, filename=None):
+		if filename is not None:
+			self.readDataFromFile(filename)
 		else:
 			self.getData()
-			self.getRVMembers()
-			self.getParallaxMembers()
+			self.addBASE9IDs()
+		self.getRVMembers(clusterName)
+		self.getParallaxMembers(clusterName)
+		if clusterName == 'M_35':
+			self.getM35PMMembers(clusterName)
+		else:
 			self.getPMMembers(clusterName)
 		self.combineMemberships()
+		self.get_coreRadius(rt)
+		# print ('Old r=',self.radius)
+		# if self.radius < self.r_tide :
+		# 	self.radius = min(1.5, self.r_tide) #10core radius or tidal radius
+		# 	print ('New r=',self.radius)
+		# 	self.getData()
+		# 	self.addBASE9IDs()
+		# 	self.getRVMembers(clusterName)
+		# 	self.getParallaxMembers(clusterName)
+		# 	if clusterName == 'M_35':
+		# 		self.getM35PMMembers(clusterName)
+		# 	else:
+		# 		self.getPMMembers(clusterName)
+		# 	self.combineMemberships()
+		# 	self.get_coreRadius(rt)
+		# 	self.saveDataToFile(filename=self.saveDataFile)
 		self.plotCMD(y = 'phot_g_mean_mag', x1 = 'phot_bp_mean_mag', x2 = 'phot_rp_mean_mag')
 		self.generatePhotFile()
 		self.generateYamlFile()
