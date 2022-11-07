@@ -129,7 +129,7 @@ class GaiaClusterMembers(object):
 		self.dmin = 0. #parsecs
 		self.dmax = 7000. #parsecs
 		self.dbins = 200
-		self.dPolyD = 6 #degrees for polynomial fit for distance distribution
+		self.dPolyD = 4 #degrees for polynomial fit for distance distribution
 		self.PMxmin = -100 #mas/yr
 		self.PMxmax = 100 #mas/yr
 		self.PMxbins = 200
@@ -147,7 +147,7 @@ class GaiaClusterMembers(object):
 		# minimum membership probability to include in the CMD
 		self.membershipMin = 0.01 
 
-		self.photSigFloor = 0.015 # floor to the photometry errors for the .phot file
+		self.photSigFloor = 0.03 # floor to the photometry errors for the .phot file
 
 		# output
 		self.SQLcmd = ''
@@ -156,7 +156,6 @@ class GaiaClusterMembers(object):
 		self.plotNameRoot = ''
 		self.photOutputFileName = 'input.phot'
 		self.yamlOutputFileName = 'base9.yaml'
-		self.saveDataFile ='data.ecsv'
 
 
 		# dict for yaml
@@ -193,12 +192,12 @@ class GaiaClusterMembers(object):
 			'sigi_ps':'i_mean_psf_mag_error',
 			'sigz_ps':'z_mean_psf_mag_error',
 			'sigy_ps':'y_mean_psf_mag_error',
-			'J_2M':'J_2M',
-			'H_2M':'H_2M',
-			'Ks_2M':'Ks_2M',
-			'sigJ_2M':'sigJ_2M',
-			'sigH_2M':'sigH_2M',
-			'sigKs_2M':'sigKs_2M',
+			'J_2M':'j_m',
+			'H_2M':'h_m',
+			'Ks_2M':'ks_m',
+			'sigJ_2M':'j_msigcom ',
+			'sigH_2M':'h_msigcom ',
+			'sigKs_2M':'ks_msigcom ',
 		}
 
 		# Redenning coefficients
@@ -285,8 +284,9 @@ class GaiaClusterMembers(object):
 
 	def get_minMembership(self,data):
 		membership = [x for x in data if x >= self.membershipMin]
-		if len(membership) < 200:
-			self.membershipMin = 0.001
+		while len(membership) < 500 and 1e-6 < self.membershipMin:
+			print ('Lowering membership minimum')
+			self.membershipMin = self.membershipMin/10.
 			membership = [x for x in data if x >= self.membershipMin]
 			# if len(membership) < 100:
 			# 	self.membershipMin = 0.00001
@@ -515,6 +515,10 @@ class GaiaClusterMembers(object):
 			print(pa1D)
 			print(pa1D.parameters)
 		if clusterName == 'M_35':
+			p_init = models.Gaussian1D(np.max(hpa), dguess, 10)\
+				+ models.Polynomial1D(degree=6)
+			fit_p = self.fitter
+			pa1D = fit_p(p_init, bpa[:-1], hpa)
 			pa1D.parameters = [ 4.26940535e+02,  8.49163992e+02,  4.03301980e+01, -5.54543195e+01, 5.97572873e-01, -4.00939709e-04,  1.21082486e-07, -1.95796276e-11, 1.64371784e-15, -5.61049975e-20]
 		if (self.createPlots):
 			hpa, bpa = np.histogram(x, bins = self.dbins, range=(self.dmin, self.dmax))
@@ -536,6 +540,7 @@ class GaiaClusterMembers(object):
 		#membership calculation
 		Fc = models.Gaussian1D()
 		Fc.parameters = pa1D.parameters[0:3]
+		self.distance = Fc.parameters[1]
 		self.PPa = Fc(x)/pa1D(x)
 		self.get_minMembership(self.PPa)
 		self.data['PPa'] = self.PPa
@@ -1454,24 +1459,23 @@ class GaiaClusterMembers(object):
 			self.getPMMembers(clusterName)
 		self.combineMemberships()
 		self.get_coreRadius(rt)
-		# print ('Old r=',self.radius)
-		# if self.radius < self.r_tide :
-		# 	self.radius = min(1.5, self.r_tide) #10core radius or tidal radius
-		# 	print ('New r=',self.radius)
-		# 	self.getData()
-		# 	self.addBASE9IDs()
-		# 	self.getRVMembers(clusterName)
-		# 	self.getParallaxMembers(clusterName)
-		# 	if clusterName == 'M_35':
-		# 		self.getM35PMMembers(clusterName)
-		# 	else:
-		# 		self.getPMMembers(clusterName)
-		# 	self.combineMemberships()
-		# 	self.get_coreRadius(rt)
-		# 	self.saveDataToFile(filename=self.saveDataFile)
+		print ('Old r=',self.radius)
+		if self.radius < self.r_tide :
+			self.radius = min(np.arctan2(30.,self.distance)*57.3, self.r_tide) #10core radius or tidal radius
+			print ('New r=',self.radius)
+			self.getData()
+			self.addBASE9IDs()
+			self.getRVMembers(clusterName)
+			self.getParallaxMembers(clusterName)
+			if clusterName == 'M_35':
+				self.getM35PMMembers(clusterName)
+			else:
+				self.getPMMembers(clusterName)
+			self.combineMemberships()
+			self.get_coreRadius(rt)
 		self.plotCMD(y = 'phot_g_mean_mag', x1 = 'phot_bp_mean_mag', x2 = 'phot_rp_mean_mag')
 		self.generatePhotFile()
 		self.generateYamlFile()
-
+		self.saveDataToFile()
 		if (self.verbose > 0):
 			print("done.")
