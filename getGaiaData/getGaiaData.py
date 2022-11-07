@@ -172,12 +172,12 @@ class GaiaClusterMembers(object):
 			'sigi_ps':'i_mean_psf_mag_error',
 			'sigz_ps':'z_mean_psf_mag_error',
 			'sigy_ps':'y_mean_psf_mag_error',
-			'J_2M':'J_2M',
-			'H_2M':'H_2M',
-			'Ks_2M':'Ks_2M',
-			'sigJ_2M':'sigJ_2M',
-			'sigH_2M':'sigH_2M',
-			'sigKs_2M':'sigKs_2M',
+			'J_2M':'j_m',
+			'H_2M':'h_m',
+			'Ks_2M':'ks_m',
+			'sigJ_2M':'j_msigcom',
+			'sigH_2M':'h_msigcom',
+			'sigKs_2M':'ks_msigcom',
 		}
 
 		# Redenning coefficients
