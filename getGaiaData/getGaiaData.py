@@ -848,6 +848,8 @@ class GaiaClusterMembers(object):
 		# take only those that pass the membership threshold
 		mask = (self.data['membership'] > self.membershipMin) 
 		members = self.data[mask]
+		members['membership'] = ((members['membership']-min(members['membership']))/(max(members['membership'])-min(members['membership']))) \
+		* 0.8 + 0.1
 
 		# include only the columns we need in the output table.
 		# Currently I am not including Gaia photometry
