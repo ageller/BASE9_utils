@@ -147,7 +147,7 @@ class GaiaClusterMembers(object):
 		# minimum membership probability to include in the CMD
 		self.membershipMin = 0.01 
 
-		self.photSigFloor = 0.03 # floor to the photometry errors for the .phot file
+		self.photSigFloor = 0.02 # floor to the photometry errors for the .phot file
 
 		# output
 		self.SQLcmd = ''
