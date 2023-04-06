@@ -1,6 +1,7 @@
 # Python code to download Gaia data at a given location
 
 from astroquery.gaia import Gaia
+from astropy.modeling.models import KingProjectedAnalytic1D
 from astropy.modeling import models, fitting
 from astropy.table import Table, Column, vstack, MaskedColumn
 import astropy.units as units
@@ -25,17 +26,20 @@ from shapely.geometry import Point as shPt
 from scipy.interpolate import interp1d, RegularGridInterpolator
 import pandas as pd
 from astropy.table import Table, join, hstack
+from scipy.integrate import quad
+from matplotlib.patches import Polygon
+from scipy import stats
 
 
-def gauss(x, mu, sigma, A):
-	return A*np.exp(-(x-mu)**2/2/sigma**2)
+def gauss(x, A, mu, sigma):
+	return A*np.exp(-(x-mu)**2/(2*sigma**2))
 def bi_norm(x, *args):
-	m1, s1, A1, m2,s2, A2 = args
-	ret = A1*scipy.stats.norm.pdf(x, loc=m1 ,scale=s1)
-	ret += A2*scipy.stats.norm.pdf(x, loc=m2 ,scale=s2)
+	A1, m1, s1, A2, m2,s2 = args
+	#ret = A1*scipy.stats.norm.pdf(x, loc=m1 ,scale=s1) + A2*scipy.stats.norm.pdf(x, loc=m2 ,scale=s2)
+	ret = gauss(x,A1,m1,s1)+gauss(x,A2,m2,s2)
 	return ret
 def tri_norm(x, *args):
-	m1, s1, A1, m2,s2, A2, m3,s3, A3 = args
+	A1, m1, s1, A2, m2,s2, A3, m3,s3 = args
 	ret = A1*scipy.stats.norm.pdf(x, loc=m1 ,scale=s1)
 	ret += A2*scipy.stats.norm.pdf(x, loc=m2 ,scale=s2)
 	ret += A3*scipy.stats.norm.pdf(x, loc=m3 ,scale=s3)
@@ -122,14 +126,17 @@ class GaiaClusterMembers(object):
 		]
 
 
+		self.Gmag_max = 16
+		self.Gmag_min = 0
+
 		# initial guesses for membership
 		self.RVmin = -100. #km/s
 		self.RVmax = 100. #km/s
-		self.RVbins = 100
+		self.RVbins = 50
 		self.dmin = 0. #parsecs
 		self.dmax = 7000. #parsecs
 		self.dbins = 200
-		self.dPolyD = 4 #degrees for polynomial fit for distance distribution
+		self.dPolyD = 6 #degrees for polynomial fit for distance distribution
 		self.PMxmin = -100 #mas/yr
 		self.PMxmax = 100 #mas/yr
 		self.PMxbins = 200
@@ -144,11 +151,8 @@ class GaiaClusterMembers(object):
 		self.r_core = 0
 		self.fitter = fitting.LevMarLSQFitter()
 
-		# minimum membership probability to include in the CMD
-		self.membershipMin = 0.01 
-
 		self.photSigFloor = 0.02 # floor to the photometry errors for the .phot file
-
+		#self.sig_fac = 3
 		# output
 		self.SQLcmd = ''
 		self.data = None # will be an astropy table
@@ -221,7 +225,7 @@ class GaiaClusterMembers(object):
 
 
 
-	def getData(self):
+	def getData(self, clusterName):
 		columns = ', '.join(self.columns)
 
 		if (self.verbose > 0):
@@ -243,6 +247,8 @@ class GaiaClusterMembers(object):
 		f"AND gaia.pmra IS NOT NULL AND abs(gaia.pmra)>0 " + \
 		f"AND gaia.pmdec IS NOT NULL AND abs(gaia.pmdec)>0;"
 
+		#print (self.ADQLcmd)
+
 		if (self.verbose > 1):
 			print(self.ADQLcmd)
 		job = Gaia.launch_job_async(self.ADQLcmd, dump_to_file=False) #could save this to a file
@@ -258,6 +264,13 @@ class GaiaClusterMembers(object):
 		self.data['phot_bp_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_bp_mean_flux_over_error'])**2 + sigmaGBP_0**2)**0.5
 		self.data['phot_rp_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_rp_mean_flux_over_error'])**2 + sigmaGRP_0**2)**0.5
 
+		self.data['coord'] = SkyCoord(self.data['ra'], self.data['dec'], frame='icrs') 
+		self.data['rCenter'] = self.center.separation(self.data['coord'])
+		self.data['id'] = self.data['source_id']
+		self.data['parallax'] = (self.data['parallax']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
+
+		self.data = self.data.to_pandas()
+		self.saveDataToFile(clusterName+'_dir/'+clusterName+'_GaiaData.ecsv')
 		if (self.verbose > 2):
 			print(self.data)
 
@@ -269,48 +282,58 @@ class GaiaClusterMembers(object):
 
 		if (self.verbose > 0):
 			print(f"Saving data to file {filename} ... ")
-		self.data.write(filename, overwrite=True)  
+		#try:
+		self.data.to_csv(filename, sep=' ',index=False)  
+		#except:
+		#	self.data.write(filename, overwrite=True) 
 
-	def readDataFromFile(self, filename=None):
-		# sread ave the data from an ecsv file
+	def readDataFromFile(self, clusterName, filename=None):
+		# read and save the data from an ecsv file
 		if (filename is None):
 			filename = 'GaiaData.ecsv'
 
 		if (self.verbose > 0):
 			print(f"Reading data from file {filename} ... ")
 
-		self.data = ascii.read(filename)  
-		#self.data  = Table(self.data, masked=True, copy=False)		
+		#self.data = ascii.read(filename)  
+		self.data = pd.read_csv(filename,sep=' ')
+		# self.data  = Table(self.data, masked=True, copy=False)
+		# self.data['coord'] = SkyCoord(self.data['ra'], self.data['dec'], frame='icrs') 
+		# self.data['rCenter'] = self.center.separation(self.data['coord'])
+		# #self.data['id'] = [int(str(x)[-15:]) for x in self.data['source_id']]
+		# self.data['id'] = self.data['source_id']
+		# self.data['parallax'] = (self.data['parallax']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
+		if self.pass_no == 1:
+			self.data = self.data[self.data['rCenter'] <= self.radius]
+		# self.data = self.data.to_pandas()
+		self.data = self.data.drop_duplicates(keep='first')
+		# sigmaG_0 = 0.0027553202
+		# sigmaGBP_0 = 0.0027901700
+		# sigmaGRP_0 = 0.0037793818
+		# self.data['phot_g_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_g_mean_flux_over_error'])**2 + sigmaG_0**2)**0.5
+		# self.data['phot_bp_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_bp_mean_flux_over_error'])**2 + sigmaGBP_0**2)**0.5
+		# self.data['phot_rp_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_rp_mean_flux_over_error'])**2 + sigmaGRP_0**2)**0.5
 
-	def get_minMembership(self,data):
-		membership = [x for x in data if x >= self.membershipMin]
-		while len(membership) < 500 and 1e-6 < self.membershipMin:
-			print ('Lowering membership minimum')
-			self.membershipMin = self.membershipMin/10.
-			membership = [x for x in data if x >= self.membershipMin]
-			# if len(membership) < 100:
-			# 	self.membershipMin = 0.00001
-			# 	membership = [x for x in data if x >= self.membershipMin]
-			# 	if len(membership) < 50:
-			# 		self.membershipMin = 1e-50
+		#self.saveDataToFile(clusterName+'_dir/'+clusterName+'_GaiaData.ecsv')
+		# if self.pass_no == 1:
+		# 	self.data = self.data['distance'] < xs
 
-	def get_coreRadius(self, rt):
-		mask = (self.data['membership'] > self.membershipMin)
+	def get_coreRadius(self):
+		mask = (self.data['membership']>0)
 		members = self.data[mask]
-		center = SkyCoord(self.RA*units.degree, self.Dec*units.degree, frame='icrs')
-		members['coord'] = SkyCoord(members['ra'], members['dec'], frame='icrs') 
-		members['rCenter'] = center.separation(members['coord']).to(units.arcmin)
-		
+		#center = SkyCoord(self.RA*units.deg, self.Dec*units.deg, frame='icrs')
+		# members['coord'] = SkyCoord(members['ra'], members['dec'], frame='icrs') 
+		# members['rCenter'] = self.center.separation(members['coord']).to(units.arcmin)
+
 		# get the histogram of radial values
 		# set the radial bins (in arcmin)
-		bins = np.linspace(0, 60, 50)
+		bins = np.linspace(0, int(self.radius*60), 60)
 
 		# calculate the bin centers
 		bin_centers = bins[:-1] + np.diff(bins)[0]
 
 		# get the radial histogram (number in each bin)
 		nr,br = np.histogram(members['rCenter'],bins = bins)
-
 		# calculate the surface areas
 		sarea = np.array([bins[i+1]**2. - bins[i]**2. for i in range(len(bins) - 1)])
 
@@ -323,21 +346,14 @@ class GaiaClusterMembers(object):
 		# make sure that the errors are always non-zero (not sure the best approach here)
 		xx = np.where(err_sdensity == 0)
 		err_sdensity[xx] = 1./sarea[xx]
-				# fit a King model
-		p_init = models.KingProjectedAnalytic1D(max(sdensity), np.median(bin_centers), rt)
+		        # fit a King model
+		p_init = models.KingProjectedAnalytic1D(max(sdensity), np.median(bin_centers), self.rt)
 		fit_p = self.fitter
 		king = fit_p(p_init, bin_centers, sdensity, weights = 1.0/err_sdensity)
-
-		# get the parameters and the uncertainties
-		# https://github.com/astropy/astropy/issues/7202
 		param_names = king.param_names
 		params = king.parameters
-		err_params = np.sqrt(np.diag(fit_p.fit_info['param_cov']))
-		print('fit parameters :')
-		for (x1,x2,x3) in zip(param_names, params, err_params):
-			print(f'{x1} = {x2:.3} +/- {x3:.3}')
-		self.r_core = params[1]/60. #convert from arcmin to deg
-		self.r_tide = params[2]/60.
+		self.r_core = float(params[1])/60.
+		self.r_tide = float(params[2])/60.
 
 	def getRVMembers(self, clusterName, savefig=True):
 		# calculate radial-velocity memberships
@@ -346,31 +362,58 @@ class GaiaClusterMembers(object):
 		
 		self.data['radial_velocity'].fill_value = np.nan
 		x = self.data['radial_velocity']
-
-		
 		#1D histogram
-		hrv, brv = np.histogram(x.filled(), bins = self.RVbins, range=(self.RVmin, self.RVmax))
+		hrv, brv = np.histogram(x, bins = self.RVbins, range=(self.RVmin, self.RVmax))
 
 		#fit
 		RVguess = brv[np.argmax(hrv)]
 		if (self.RVmean is not None):
 			RVguess = self.RVmean
-		p_init = models.Gaussian1D(np.max(hrv), RVguess, 1) \
-				+ models.Gaussian1D(5, brv[np.argmax(hrv)], 50)
-		fit_p = self.fitter
-		rvG1D = fit_p(p_init, brv[:-1], hrv)
-		self.RVsigma = min(rvG1D.stddev_0[0],rvG1D.stddev_1[0])
+		if self.pass_no ==1:
+			p_init = models.Gaussian1D(np.max(hrv), RVguess, 1) \
+					+ models.Gaussian1D(5, brv[np.argmax(hrv)], 50)
+			if clusterName == 'M_35':
+				p_init = models.Gaussian1D(np.max(hrv), -10, 20) +\
+				models.Gaussian1D(np.max(hrv), RVguess, 10)
+
+		# if self.pass_no == 2:
+		# 	if clusterName == 'M_35':
+		# 		p_init = models.Gaussian1D(300, -10, 1)+\
+		# 		models.Gaussian1D(np.max(hrv), RVguess, 5)
+		# 	else:
+		# 		p_init = models.Gaussian1D(np.max(hrv), self.rv_fit.parameters[1], self.rv_fit.parameters[2]) \
+		# 				+ models.Gaussian1D(np.max(hrv)*.8, self.rv_fit.parameters[4], self.rv_fit.parameters[5])
+
+
+
+			fit_p = self.fitter
+			rvG1D = fit_p(p_init, brv[:-1], hrv)
+			#if self.pass_no == 1:
+			self.rv_fit = rvG1D
+		if self.pass_no ==2:
+			rvG1D = self.rv_fit
+
 		if (self.verbose > 1):
 			print(rvG1D)
-			print(rvG1D.parameters)
-		if clusterName == 'M_35':
-			rvG1D.parameters = [23.62842185, 25.31086499,  2.771733,   38.34134755,  6.28088832, 30.03207677]
+
+		mean = self.rv_fit.parameters[1]
+		sig = self.rv_fit.parameters[2]
+
+
+		self.data['PRV'] = (self.data['radial_velocity'] - mean)**2/(sig**2)
+		self.data['PRV'] = np.where(((self.data['radial_velocity'] > mean+self.sig_fac*sig) & (np.isnan(self.data['radial_velocity'])==False)) | ((self.data['radial_velocity'] < mean-self.sig_fac*sig) & (np.isnan(self.data['radial_velocity'])==False)), 0, self.data['PRV'])
+		if clusterName == 'M_21':
+			self.data['PRV'] = 1
 		if (self.createPlots):
-			hrv, brv = np.histogram(x.filled(), bins = self.RVbins, range=(self.RVmin, self.RVmax))
+			hrv, brv = np.histogram(x, bins = self.RVbins, range=(self.RVmin, self.RVmax))
 			xf = np.linspace(self.RVmin, self.RVmax, self.RVbins*10)
 			f, ax = plt.subplots()
 			ax.step(brv[:-1],hrv, color='black')
-			ax.plot(xf,rvG1D(xf), color='deeppink', lw=5)
+			ax.plot(xf,bi_norm(xf,*rvG1D.parameters), color='deeppink', lw=3)
+			plt.plot([mean,mean],[0,max(hrv)],color='black')
+			plt.plot([mean-self.sig_fac*sig,mean-self.sig_fac*sig],[0,max(hrv)],color='gray',lw=3)
+			plt.plot([mean+self.sig_fac*sig,mean+self.sig_fac*sig],[0,max(hrv)],color='gray',lw=3)
+			plt.plot()
 			foo = models.Gaussian1D(*rvG1D.parameters[0:3])
 			ax.plot(xf, foo(xf), color='gray')
 			foo = models.Gaussian1D(*rvG1D.parameters[3:])
@@ -378,119 +421,13 @@ class GaiaClusterMembers(object):
 			ax.set_xlabel(r'RV (km s$^{-1}$)', fontsize = 16)
 			ax.set_ylabel('N', fontsize = 16)
 			ax.axvline(rvG1D.parameters[1], color='tab:purple', ls='dotted')
-			ax.annotate(f'RV = {rvG1D.parameters[1]:.1f} km/s', (rvG1D.parameters[1] + + 0.05*(self.RVmax - self.RVmin), 0.95*max(hrv)) )
+			ax.annotate(f'RV = {rvG1D.parameters[1]:.1f} km/s', (rvG1D.parameters[1] + 0.05*(self.RVmax - self.RVmin), 0.95*max(hrv)) )
+
+
 			if (savefig):
-				f.savefig(self.plotNameRoot + 'RVHist.pdf', format='PDF', bbox_inches='tight')
+				f.savefig(self.plotNameRoot + 'RVHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
 			
-		#membership calculation
-		Fc = models.Gaussian1D()
-		Fc.parameters = rvG1D.parameters[:3]
-		self.PRV = Fc(x)/rvG1D(x)
-		self.get_minMembership(self.PRV)
-		self.data['PRV'] = self.PRV
 
-
-	def getPMRAmembers(self, savefig=True):
-		if (self.verbose > 0):
-			print("Finding prpoper_motion members ... ")
-		
-		x = self.data['pmra']
-		#1D histogram
-		hrv1, brv1 = np.histogram(x, bins = self.PMxbins, range=(self.PMxmin, self.PMxmax))
-		max_peak = brv1[np.argmax(hrv1)]
-		left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/100])
-		right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/100]) #find range for fit
-		hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))
-		params = [brv[np.argmax(hrv)], 1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
-		fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
-		xf = np.linspace(left, right, len(hrv))
-		synth_dist = bi_norm(xf, *fitted_params)
-		residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
-		res_max_peak = brv[np.argmax(residuals)]
-		res_params=[res_max_peak,.1, hrv[np.argmax(residuals)]]
-		tri_params = np.append(res_params, fitted_params)
-		tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
-		sigmas = [tri_fitted_params[i] for i in [1,4,7]]
-		if 0.5 <= min(sigmas):
-			print ('ZOOMED')
-			print (len(x)/10)
-			left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/15])
-			right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/15]) #find range for fit
-			hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))	
-			params = [brv[np.argmax(hrv)], 1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
-			fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
-			xf = np.linspace(left, right, len(hrv))
-			synth_dist = bi_norm(xf, *fitted_params)
-			residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
-			res_max_peak = brv[np.argmax(residuals)]
-			res_params=[res_max_peak,.1, hrv[np.argmax(residuals)]]
-			tri_params = np.append(res_params, fitted_params)
-			tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
-		sigmas = [tri_fitted_params[i] for i in [1,4,7]]
-		G1_sig = [i for i in [1,4,7] if tri_fitted_params[i] == min(sigmas)][0]
-		G1_params =[tri_fitted_params[G1_sig-1],tri_fitted_params[G1_sig],tri_fitted_params[G1_sig+1]]
-		bi_norm_params = [tri_fitted_params[i] for i in range(len(tri_fitted_params)) if i not in [G1_sig-1,G1_sig,G1_sig+1]]
-		tri_fitted_params = np.append(G1_params,bi_norm_params)
-		if (self.verbose > 1):
-			print(tri_fitted_params)
-		if (self.createPlots):
-			f, ax = plt.subplots()
-			xf=np.linspace(left,right,10*self.RVbins)
-			ax.step(brv[:-1],hrv, color='black')
-			ax.plot(xf,tri_norm(xf, *tri_fitted_params), color='deeppink', lw=5)
-			ax.plot(xf,gauss(xf, *tri_fitted_params[:3]), color='gray')
-			ax.plot(xf,bi_norm(xf, *tri_fitted_params[3:]), color='darkslateblue', ls='dashed')
-
-
-	def getPMDECmembers(self, savefig=True):
-		if (self.verbose > 0):
-			print("Finding prpoper_motion members ... ")
-		
-		x = self.data['pmdec']
-		#1D histogram
-		hrv1, brv1 = np.histogram(x, bins = self.PMxbins, range=(self.PMxmin, self.PMxmax))
-		max_peak = brv1[np.argmax(hrv1)]
-		left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/100])
-		right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/100]) #find range for fit
-		hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))
-		params = [brv[np.argmax(hrv)], .1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
-		fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
-		xf = np.linspace(left, right, len(hrv))
-		synth_dist = bi_norm(xf, *fitted_params)
-		residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
-		res_max_peak = brv[np.argmax(residuals)]
-		res_params=[res_max_peak,1, hrv[np.argmax(residuals)]]
-		tri_params = np.append(res_params, fitted_params)
-		tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
-		sigmas = [tri_fitted_params[i] for i in [1,4,7]]
-		if 0.5 <= min(sigmas):
-			print('Zoomed')
-			left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/15])
-			right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/15]) #find range for fit
-			hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))	
-			params = [brv[np.argmax(hrv)], 1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
-			fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
-			xf = np.linspace(left, right, len(hrv))
-			synth_dist = bi_norm(xf, *fitted_params)
-			residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
-			res_max_peak = brv[np.argmax(residuals)]
-			res_params=[res_max_peak,.1, hrv[np.argmax(residuals)]]
-			tri_params = np.append(res_params, fitted_params)
-			tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
-		sigmas = [tri_fitted_params[i] for i in [1,4,7]]
-		G1_sig = [i for i in [1,4,7] if tri_fitted_params[i] == min(sigmas)][0]
-		G1_params =[tri_fitted_params[G1_sig-1],tri_fitted_params[G1_sig],tri_fitted_params[G1_sig+1]]
-		bi_norm_params = [tri_fitted_params[i] for i in range(len(tri_fitted_params)) if i not in [G1_sig-1,G1_sig,G1_sig+1]]
-		tri_fitted_params = np.append(G1_params,bi_norm_params)
-		if (self.verbose > 1):
-			print(tri_fitted_params)
-		if (self.createPlots):
-			f, ax = plt.subplots()
-			xf=np.linspace(left,right,10*self.RVbins)
-			ax.step(brv[:-1],hrv, color='black')
-			ax.plot(xf,tri_norm(xf, *tri_fitted_params), color='deeppink', lw=5)
-			ax.plot(xf,gauss(xf, *tri_fitted_params[:3]), color='gray')
-			ax.plot(xf,bi_norm(xf, *tri_fitted_params[3:]), color='darkslateblue', ls='dashed')
 
 
 	def getParallaxMembers(self, clusterName, savefig=True):
@@ -498,9 +435,7 @@ class GaiaClusterMembers(object):
 		if (self.verbose > 0):
 			print("Finding parallax members ... ")
 			
-		x = (self.data['parallax']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
-		
-		#1D histogram
+		x = self.data['parallax']
 		hpa, bpa = np.histogram(x, bins = self.dbins, range=(self.dmin, self.dmax))
 
 		#fit
@@ -511,23 +446,39 @@ class GaiaClusterMembers(object):
 				+ models.Polynomial1D(degree=self.dPolyD)
 		fit_p = self.fitter
 		pa1D = fit_p(p_init, bpa[:-1], hpa)
+		if self.pass_no == 1:
+		 	self.pa_fit = pa1D
 		if (self.verbose > 1):
 			print(pa1D)
-			print(pa1D.parameters)
-		if clusterName == 'M_35':
-			p_init = models.Gaussian1D(np.max(hpa), dguess, 10)\
-				+ models.Polynomial1D(degree=6)
-			fit_p = self.fitter
+		if clusterName == 'M_35' and self.pass_no==1:
+			#AMP,MEAN,SIG
+			p_init = models.Gaussian1D(4.26940535e+02,  8.49163992e+02,  4.03301980e+01) + models.Polynomial1D(degree=6)
 			pa1D = fit_p(p_init, bpa[:-1], hpa)
-			pa1D.parameters = [ 4.26940535e+02,  8.49163992e+02,  4.03301980e+01, -5.54543195e+01, 5.97572873e-01, -4.00939709e-04,  1.21082486e-07, -1.95796276e-11, 1.64371784e-15, -5.61049975e-20]
+			pa1D.parameters[2]= 8.49163992e+02
+		if self.pass_no == 2:
+			pa1D = self.pa_fit
+		mean = pa1D.parameters[1]
+		sig = pa1D.parameters[2]
+		self.data['PPa'] = (self.data['parallax'] - mean)**2/(sig**2)
+		if clusterName != 'NGC_6791':
+			self.data['PPa'] = np.where(((self.data['parallax'] > mean+self.sig_fac*sig)  & (np.isnan(self.data['parallax'])==False)) \
+			 | ((self.data['parallax'] < mean-self.sig_fac*sig) & (np.isnan(self.data['parallax'])==False)), 0, self.data['PPa'])
+		else:
+			self.data['PPa'] = 1
 		if (self.createPlots):
 			hpa, bpa = np.histogram(x, bins = self.dbins, range=(self.dmin, self.dmax))
 			xf = np.linspace(self.dmin, self.dmax, self.dbins*10)
 			f,ax = plt.subplots()
 			ax.step(bpa[:-1],hpa, color='black')
 			ax.plot(xf,pa1D(xf), color='deeppink', lw=5)
-			foo = models.Gaussian1D(*pa1D.parameters[0:3])
-			ax.plot(xf, foo(xf), color='gray')
+			if clusterName == 'NGC_6791':
+				ax.plot(xf,pa1D(xf), color='gray')
+			else:
+				foo = models.Gaussian1D(*pa1D.parameters[0:3])
+				ax.plot(xf, foo(xf), color='gray')
+			ax.plot([mean,mean],[0,max(hpa)],color='black',lw=3)
+			ax.plot([mean-self.sig_fac*sig, mean-self.sig_fac*sig],[0,max(hpa)],color='gray',lw=3)
+			ax.plot([mean+self.sig_fac*sig, mean+self.sig_fac*sig],[0,max(hpa)],color='gray',lw=3)
 			foo = models.Polynomial1D(degree=self.dPolyD)
 			ax.plot(xf, foo.evaluate(xf,*pa1D.parameters[3:]), color='darkslateblue', ls='dashed')
 			ax.set_xlabel('distance (pc)', fontsize = 16)
@@ -535,201 +486,114 @@ class GaiaClusterMembers(object):
 			ax.axvline(pa1D.parameters[1], color='tab:purple', ls='dotted')
 			ax.annotate(f'd = {pa1D.parameters[1]:.1f} pc', (pa1D.parameters[1] + 0.05*(self.dmax - self.dmin), 0.95*max(hpa)) )
 			if (savefig):
-				f.savefig(self.plotNameRoot + 'dHist.pdf', format='PDF', bbox_inches='tight')
-			
-		#membership calculation
-		Fc = models.Gaussian1D()
-		Fc.parameters = pa1D.parameters[0:3]
-		self.distance = Fc.parameters[1]
-		self.PPa = Fc(x)/pa1D(x)
-		self.get_minMembership(self.PPa)
-		self.data['PPa'] = self.PPa
+				f.savefig(self.plotNameRoot + 'dHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
 
-	
-	def getM35PMMembers(self, savefig=True):
+
+
+
+	def getPMMembers(self, clusterName, savefig=True):
 		if (self.verbose > 0):
 			print("finding proper-motion members ...")
 
-		def getPMparams(x, left, right):
-			#1D histogram
-			hrv1, brv1 = np.histogram(x, bins = self.PMxbins, range=(self.PMxmin, self.PMxmax))
-			max_peak = brv1[np.argmax(hrv1)]
-			left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/100])
-			right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/100]) #find range for fit
-			hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))
-			params = [brv[np.argmax(hrv)], .1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
-			fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
-			xf = np.linspace(left, right, len(hrv))
-			synth_dist = bi_norm(xf, *fitted_params)
-			residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
-			res_max_peak = brv[np.argmax(residuals)]
-			res_params=[res_max_peak,1, hrv[np.argmax(residuals)]]
-			tri_params = np.append(res_params, fitted_params)
-			tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
-			sigmas = [tri_fitted_params[i] for i in [1,4,7]]
-			if 0.5 <= min(sigmas):
-				print('Zoomed')
-				left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/50])
-				right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/50]) #find range for fit
-				hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))	
-				params = [brv[np.argmax(hrv)], 1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
-				fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
-				xf = np.linspace(left, right, len(hrv))
-				synth_dist = bi_norm(xf, *fitted_params)
-				residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
-				res_max_peak = brv[np.argmax(residuals)]
-				res_params=[res_max_peak,.1, hrv[np.argmax(residuals)]]
-				tri_params = np.append(res_params, fitted_params)
-				tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
-			sigmas = [tri_fitted_params[i] for i in [1,4,7]]
-			G1_sig = [i for i in [1,4,7] if tri_fitted_params[i] == min(sigmas)][0]
-			G1_params =[tri_fitted_params[G1_sig-1],tri_fitted_params[G1_sig],tri_fitted_params[G1_sig+1]]
-			bi_norm_params = [tri_fitted_params[i] for i in range(len(tri_fitted_params)) if i not in [G1_sig-1,G1_sig,G1_sig+1]]
-			tri_fitted_params = np.append(G1_params,bi_norm_params)
-			synth_dist = tri_norm(xf, *tri_fitted_params)
-			residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
-			res_max_peak = brv[np.argmax(residuals)]
-			res_params=[res_max_peak,1, hrv[np.argmax(residuals)]]
-			quad_params = np.append(res_params, tri_fitted_params)
-			quad_fitted_params,_ = scipy.optimize.curve_fit(quad_norm,brv[:-1], hrv, p0=quad_params, method='lm',sigma=np.sqrt(hrv))
-			return quad_fitted_params, left, right
-
-		
-		# add in other members as a check
-		members = Table(names = self.data.colnames)
-		if ('PRV' in self.data.colnames):
-			members = vstack([members, self.data[np.logical_and(self.data['PRV'] > self.membershipMin, ~self.data['PRV'].mask)]])
-		if ('PPa' in self.data.colnames):
-			members = vstack([members, self.data[self.data['PPa'] > self.membershipMin]])
-		
-		x = self.data['pmra']
-		y = self.data['pmdec']
-		#x_params = getPMparams(x, 0, 4)
-		#y_params = getPMparams(y,-5, -1.5)
-		x_params = ([ 2.14554816e+00,  3.15415350e-01,  1.43725977e+02, -1.84327137e-01,
-		1.38119881e-01,  8.82605507e+01,  3.08773023e-01,  7.27310972e-01,
-		2.68756236e+03,  5.27204785e-01,  2.00172830e+00,  1.75295735e+03], -4.0, 4.0)
-		y_params = ([-2.98155723e+00,  2.15189164e-01,  6.01165304e+01, -1.99652011e+00,
-		1.23128364e-01,  1.01575910e+02, -1.46901709e+00,  1.06047625e+00,
-		1.13759993e+03, -3.11615648e+00,  2.61525329e+00,  4.19396516e+02], -8.0, 2.0)
-		PMxmin=x_params[1]
-		PMxmax=x_params[2]
-		PMymin=y_params[1]
-		PMymax=y_params[2]
-
-		if (self.verbose > 1):
-			print(x_params,y_params)
-		if (self.createPlots):
-			f = plt.figure(figsize=(8, 8)) 
-			gs = gridspec.GridSpec(2, 2, height_ratios = [1, 3], width_ratios = [3, 1]) 
-			ax1 = plt.subplot(gs[0])
-			ax2 = plt.subplot(gs[2])
-			ax3 = plt.subplot(gs[3])
-
-			#histograms
-			hx1D, x1D = np.histogram(x,bins=self.PMxbins,range=(PMxmin,PMxmax))
-			xf = np.linspace(PMxmin,PMxmax,self.PMxbins)
-			ax1.step(x1D[:-1], hx1D, color='black')
-			ax1.plot(xf, quad_norm(xf, *x_params[0]), color='deeppink', lw=3)
-			ax1.plot(xf, gauss(xf, *x_params[0][:3]), color='gray')
-			ax1.plot(xf, tri_norm(xf, *x_params[0][3:]), color='darkslateblue', ls='dashed')
-			ax1.axvline(x_params[0][0],color='tab:purple', ls='dotted')
-			ax1.annotate(r'$\mu_\alpha$ =' + f'{x_params[0][0]:.1f}' + r'mas yr$^{-1}$', (x_params[0][0] + 0.05*(x_params[2] - x_params[1]), 0.95*max(hx1D)) )
-			ax1.set_ylim(-.05*max(hx1D),max(hx1D)+.1*max(hx1D))
-
-			hy1D, y1D = np.histogram(y,bins=self.PMybins,range=(PMymin,PMymax))
-			yf = np.linspace(PMymin,PMymax,200)
-			ax3.step(hy1D, y1D[:-1], color='black')
-			ax3.plot(quad_norm(yf, *y_params[0]),yf, color='deeppink', lw=3)
-			ax3.plot(gauss(yf, *y_params[0][9:12]),yf, color='gray')
-			ax3.plot(tri_norm(yf, *y_params[0][:9]),yf, color='darkslateblue', ls='dashed')
-			ax3.axhline(y_params[0][0],color='tab:purple', ls='dotted')
-			ax3.annotate(r'$\mu_\alpha$ =' + f'{y_params[0][0]:.1f}' + r'mas yr$^{-1}$',(0.95*max(hy1D), y_params[0][0] + 0.05*(y_params[2] - y_params[1])), rotation=90)
-			ax3.set_xlim(-.05*max(hy1D),max(hy1D)+.1*max(hy1D))
-
-			ax2.scatter(x,y,color='darkgray',marker='.')
-			ax2.scatter(members['pmra'], members['pmdec'], color='cyan', marker='.')
-
-			ax1.set_xlim(PMxmin, PMxmax)
-			ax2.set_xlim(PMxmin, PMxmax)
-			ax2.set_ylim(PMymin, PMymax)
-			ax3.set_ylim(PMymin, PMymax)
-			ax2.set_xlabel(r'$\mu_\alpha$ (mas yr$^{-1}$)', fontsize=16)
-			ax2.set_ylabel(r'$\mu_\delta$ (mas yr$^{-1}$)', fontsize=16)
-			plt.setp(ax1.get_yticklabels()[0], visible=False)
-			plt.setp(ax1.get_xticklabels(), visible=False)
-			plt.setp(ax3.get_yticklabels(), visible=False)
-			plt.setp(ax3.get_xticklabels()[0], visible=False)
-			f.subplots_adjust(hspace=0., wspace=0.)
-			if (savefig):
-				f.savefig(self.plotNameRoot + 'PMHist.pdf', format='PDF', bbox_inches='tight')
-
-		#membership calculation
-		RA_mems = gauss(x, *x_params[0][:3])/quad_norm(x, *x_params[0])
-		DEC_mems = gauss(y, *y_params[0][9:12])/quad_norm(y, *y_params[0])
-		self.PPM = np.array(RA_mems*DEC_mems)
-		self.get_minMembership(self.PPM)
-		self.data['PPM'] = self.PPM
-
-	def getPMMembers(self, savefig=True):
-		if (self.verbose > 0):
-			print("finding proper-motion members ...")
-
-		def getPMparams(x):
+		def getPMparams(x, type):
 		#1D histogram
-			hrv1, brv1 = np.histogram(x, bins = self.PMxbins, range=(self.PMxmin, self.PMxmax))
+			if clusterName == 'M_35':
+				mask1 = (self.data['phot_g_mean_mag'] < 15)
+				x = x[mask1]
+			if clusterName == 'NGC_7789':
+				mask1 = (self.data['phot_g_mean_mag'] < 18)
+				x = x[mask1]
+			if type == 'x':
+				hrv1, brv1 = np.histogram(x, bins = self.PMxbins, range=(self.PMxmin, self.PMxmax))
+			if type == 'y':
+				hrv1, brv1 = np.histogram(x, bins = self.PMxbins, range=(self.PMymin, self.PMymax))
 			max_peak = brv1[np.argmax(hrv1)]
-			left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/100])
-			right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/100]) #find range for fit
+			if self.pass_no == 1:
+				left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/1000])
+				right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/1000]) #find range for fit
+			if self.pass_no == 2:
+				if type == 'x':
+					left = self.PMxmin
+					right = self.PMxmax
+				if type == 'y':
+					left = self.PMymin
+					right = self.PMymax
 			hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))
-			params = [brv[np.argmax(hrv)], .1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
+			params = [np.max(hrv),brv[np.argmax(hrv)], .1,np.max(hrv),brv[np.argmax(hrv)], 1]
 			fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
 			xf = np.linspace(left, right, len(hrv))
 			synth_dist = bi_norm(xf, *fitted_params)
 			residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
 			res_max_peak = brv[np.argmax(residuals)]
-			res_params=[res_max_peak,1, hrv[np.argmax(residuals)]]
-			tri_params = np.append(res_params, fitted_params)
-			tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
-			sigmas = [tri_fitted_params[i] for i in [1,4,7]]
-			if 0.5 <= min(sigmas):
-				print ('ZOOMED')
-				left = max([brv1[i] for i in range(len(hrv1)) if brv1[i] < max_peak and hrv1[i] <= len(x)/15])
-				right = min([brv1[i] for i in range(len(hrv1)) if brv1[i] > max_peak and hrv1[i] <= len(x)/15]) #find range for fit
-				hrv, brv = np.histogram(x, bins = self.PMxbins, range=(left, right))	
-				params = [brv[np.argmax(hrv)], 1,np.max(hrv), brv[np.argmax(hrv)], 1, np.max(hrv)]
-				fitted_params,_ = scipy.optimize.curve_fit(bi_norm,brv[:-1], hrv, p0=params, method='lm',sigma=np.sqrt(hrv))
-				xf = np.linspace(left, right, len(hrv))
-				synth_dist = bi_norm(xf, *fitted_params)
-				residuals =[hrv[i]-synth_dist[i] for i in range(len(hrv))]
-				res_max_peak = brv[np.argmax(residuals)]
-				res_params=[res_max_peak,.1, hrv[np.argmax(residuals)]]
+			res_params=[hrv[np.argmax(residuals)],res_max_peak,1]
+			if self.pass_no == 1:
 				tri_params = np.append(res_params, fitted_params)
-				tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
-			sigmas = [tri_fitted_params[i] for i in [1,4,7]]
-			G1_sig = [i for i in [1,4,7] if tri_fitted_params[i] == min(sigmas)][0]
-			G1_params =[tri_fitted_params[G1_sig-1],tri_fitted_params[G1_sig],tri_fitted_params[G1_sig+1]]
-			bi_norm_params = [tri_fitted_params[i] for i in range(len(tri_fitted_params)) if i not in [G1_sig-1,G1_sig,G1_sig+1]]
+				if type == 'x':
+					self.pm_xparams = tri_params
+				if type == 'y':
+					self.pm_yparams = tri_params
+			if self.pass_no == 2:
+				if type == 'x':
+					tri_params = self.pm_xparams
+				if type == 'y':
+					tri_params = self.pm_yparams
+					print (tri_params)
+
+			tri_fitted_params,_ = scipy.optimize.curve_fit(tri_norm,brv[:-1], hrv, p0=tri_params, method='lm',sigma=np.sqrt(hrv))
+			sigmas = [tri_fitted_params[i] for i in [2,5,8]]
+			G1_sig = [i for i in [2,5,8] if tri_fitted_params[i] == min(sigmas)][0]
+			G1_params =[tri_fitted_params[G1_sig-2],tri_fitted_params[G1_sig-1],tri_fitted_params[G1_sig]]
+			bi_norm_params = [tri_fitted_params[i] for i in range(len(tri_fitted_params)) if i not in [G1_sig-2,G1_sig-1,G1_sig]]
 			tri_fitted_params = np.append(G1_params,bi_norm_params)
+			if self.pass_no == 1 and type == 'x':
+				self.PMxmin = left
+				self.PMxmax = right
+			if self.pass_no == 2 and type == 'x':
+				left = self.PMxmin
+				right = self.PMxmax
+			if self.pass_no == 1 and type == 'y':
+				self.PMymin = left
+				self.PMymax = right
+			if self.pass_no == 2 and type == 'y':
+				left = self.PMymin
+				right = self.PMymax
 			return tri_fitted_params,left,right
 
-		
-		# add in other members as a check
-		members = Table(names = self.data.colnames)
-		if ('PRV' in self.data.colnames):
-			members = vstack([members, self.data[np.logical_and(self.data['PRV'] > self.membershipMin, ~self.data['PRV'].mask)]])
-		if ('PPa' in self.data.colnames):
-			members = vstack([members, self.data[self.data['PPa'] > self.membershipMin]])
-		
 		x = self.data['pmra']
 		y = self.data['pmdec']
-		x_params = getPMparams(x)
-		y_params = getPMparams(y)
-		PMxmin=x_params[1]
-		PMxmax=x_params[2]
-		PMymin=y_params[1]
-		PMymax=y_params[2]
+		if self.pass_no == 1:
+			self.x_params = getPMparams(x,'x')
+			self.y_params = getPMparams(y,'y')
+			self.PMxmin=self.x_params[1]
+			self.PMxmax=self.x_params[2]
+			self.PMymin=self.y_params[1]
+			self.PMymax=self.y_params[2]		
+			self.PM_ra_fit = self.x_params[0][:3]
+			self.PM_dec_fit = self.y_params[0][:3]
+		# if self.pass_no == 2 :
+		# 	x_params[0][:3] = self.PM_ra_fit
+		# 	y_params[0][:3] = self.PM_dec_fit
+		xmean = self.PM_ra_fit[1]
+		xsig = self.PM_ra_fit[2]
+		ymean = self.PM_dec_fit[1]
+		ysig = self.PM_dec_fit[2]
 
+
+		#self.data['PPM']=self.data['PM_ra']+self.data['PM_dec']
+
+		# self.data['PPM'] = self.data['ra']*0
+		# self.data['PM_ra'] = self.data['ra']*0
+		# self.data['PM_dec'] = self.data['ra']*0
+		self.data['PM_ra']=(self.data['pmra']- xmean)**2/(xsig**2) 
+		self.data['PM_dec']=(self.data['pmdec'] - ymean)**2/(ysig**2)
+		self.data['PM_ra'] = np.where((self.data['pmra'] > xmean+self.sig_fac*xsig) | (self.data['pmra'] < xmean-self.sig_fac*xsig), 0, self.data['PM_ra'])
+		self.data['PM_dec']=np.where((self.data['pmdec'] > ymean+self.sig_fac*ysig) | (self.data['pmdec'] < ymean-self.sig_fac*ysig), 0, self.data['PM_dec'])
+		PPM1 = self.data['PM_ra']*self.data['PM_dec']
+		PPM2 =self.data['PM_ra']+self.data['PM_dec']
+		#self.data['PPM'] =[min(PPM1[i],PPM2[i]) for i in range(len(self.data))]
+		self.data['PPM'] = PPM1
+
+		self.combineMemberships()
 		if (self.verbose > 1):
 			print(x_params,y_params)
 		if (self.createPlots):
@@ -740,33 +604,39 @@ class GaiaClusterMembers(object):
 			ax3 = plt.subplot(gs[3])
 
 			#histograms
-			hx1D, x1D = np.histogram(x,bins=self.PMxbins,range=(PMxmin,PMxmax))
-			xf = np.linspace(PMxmin,PMxmax,self.PMxbins)
+			hx1D, x1D = np.histogram(x,bins=self.PMxbins,range=(self.PMxmin,self.PMxmax))
+			xf = np.linspace(self.PMxmin,self.PMxmax,self.PMxbins)
 			ax1.step(x1D[:-1], hx1D, color='black')
-			ax1.plot(xf, tri_norm(xf, *x_params[0]), color='deeppink', lw=3)
-			ax1.plot(xf, gauss(xf, *x_params[0][:3]), color='gray')
-			ax1.plot(xf, bi_norm(xf, *x_params[0][3:]), color='darkslateblue', ls='dashed')
-			ax1.axvline(x_params[0][0],color='tab:purple', ls='dotted')
-			ax1.annotate(r'$\mu_\alpha$ =' + f'{x_params[0][0]:.1f}' + r'mas yr$^{-1}$', (x_params[0][0] + 0.05*(x_params[2] - x_params[1]), 0.95*max(hx1D)) )
+			ax1.plot(xf, tri_norm(xf, *self.x_params[0]), color='deeppink', lw=3)
+			ax1.plot(xf, gauss(xf, *self.x_params[0][:3]), color='gray')
+			ax1.plot([xmean, xmean],[0,max(hx1D)],lw=3,color='black')
+			ax1.plot([xmean-self.sig_fac*xsig, xmean-self.sig_fac*xsig],[0,max(hx1D)],lw=3,color='gray')
+			ax1.plot([xmean+self.sig_fac*xsig, xmean+self.sig_fac*xsig],[0,max(hx1D)],lw=3,color='gray')
+			#ax1.plot(xf, bi_norm(xf, *x_params[0][:6]), color='darkslateblue', ls='dashed')
+			ax1.axvline(self.x_params[0][0],color='tab:purple', ls='dotted')
+			#ax1.annotate(r'$\mu_\alpha$ =' + f'{x_params[0][0]:.1f}' + r'mas yr$^{-1}$', (x_params[0][0] + 0.05*(x_params[2] - x_params[1]), 0.95*max(hx1D)) )
 			ax1.set_ylim(-.05*max(hx1D),max(hx1D)+.1*max(hx1D))
 
-			hy1D, y1D = np.histogram(y,bins=self.PMybins,range=(PMymin,PMymax))
-			yf = np.linspace(PMymin,PMymax,200)
+			hy1D, y1D = np.histogram(y,bins=self.PMybins,range=(self.PMymin,self.PMymax))
+			yf = np.linspace(self.PMymin,self.PMymax,200)
 			ax3.step(hy1D, y1D[:-1], color='black')
-			ax3.plot(tri_norm(yf, *y_params[0]),yf, color='deeppink', lw=3)
-			ax3.plot(gauss(yf, *y_params[0][:3]),yf, color='gray')
-			ax3.plot(bi_norm(yf, *y_params[0][3:]),yf, color='darkslateblue', ls='dashed')
-			ax3.axhline(y_params[0][0],color='tab:purple', ls='dotted')
-			ax3.annotate(r'$\mu_\alpha$ =' + f'{y_params[0][0]:.1f}' + r'mas yr$^{-1}$',(0.95*max(hy1D), y_params[0][0] + 0.05*(y_params[2] - y_params[1])), rotation=90)
+			ax3.plot(tri_norm(yf, *self.y_params[0]),yf, color='deeppink', lw=3)
+			ax3.plot(gauss(yf, *self.y_params[0][0:3]),yf, color='gray')
+
+			ax3.plot([0,max(hy1D)],[ymean-self.sig_fac*ysig, ymean-self.sig_fac*ysig],lw=3,color='gray')
+			ax3.plot([0,max(hy1D)],[ymean+self.sig_fac*ysig, ymean+self.sig_fac*ysig],lw=3,color='gray')
+			#ax3.plot(bi_norm(yf, *y_params[0][:6]),yf, color='darkslateblue', ls='dashed')
+			ax3.axhline(self.y_params[0][0],color='tab:purple', ls='dotted')
+			#ax3.annotate(r'$\mu_\alpha$ =' + f'{y_params[0][0]:.1f}' + r'mas yr$^{-1}$',(0.95*max(hy1D), y_params[0][0] + 0.05*(y_params[2] - y_params[1])), rotation=90)
 			ax3.set_xlim(-.05*max(hy1D),max(hy1D)+.1*max(hy1D))
 
 			ax2.scatter(x,y,color='darkgray',marker='.')
-			ax2.scatter(members['pmra'], members['pmdec'], color='cyan', marker='.')
+			ax2.scatter(x[self.data['PPM'] > 0], y[self.data['PPM'] > 0], color='cyan', marker='.')
 
-			ax1.set_xlim(PMxmin, PMxmax)
-			ax2.set_xlim(PMxmin, PMxmax)
-			ax2.set_ylim(PMymin, PMymax)
-			ax3.set_ylim(PMymin, PMymax)
+			ax1.set_xlim(self.PMxmin, self.PMxmax)
+			ax2.set_xlim(self.PMxmin, self.PMxmax)
+			ax2.set_ylim(self.PMymin, self.PMymax)
+			ax3.set_ylim(self.PMymin, self.PMymax)
 			ax2.set_xlabel(r'$\mu_\alpha$ (mas yr$^{-1}$)', fontsize=16)
 			ax2.set_ylabel(r'$\mu_\delta$ (mas yr$^{-1}$)', fontsize=16)
 			plt.setp(ax1.get_yticklabels()[0], visible=False)
@@ -775,26 +645,22 @@ class GaiaClusterMembers(object):
 			plt.setp(ax3.get_xticklabels()[0], visible=False)
 			f.subplots_adjust(hspace=0., wspace=0.)
 			if (savefig):
-				f.savefig(self.plotNameRoot + 'PMHist.pdf', format='PDF', bbox_inches='tight')
+				f.savefig(self.plotNameRoot + 'PMHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
 
-		#membership calculation
-		RA_mems = gauss(x, *x_params[0][:3])/tri_norm(x, *x_params[0])
-		DEC_mems = gauss(y, *y_params[0][:3])/tri_norm(y, *y_params[0])
-		self.PPM = np.array(RA_mems*DEC_mems)
-		self.get_minMembership(self.PPM)
-		self.data['PPM'] = self.PPM
 
 	def combineMemberships(self):
 		if (self.verbose > 0):
 			print("combining memberships ...")
-		# I'm not sure the best way to combine these
-		# We probably want to multiple them together, but if there is no membership (e.g., in RV), then we still keep the star
-		self.data['PRV'].fill_value = 1.
-		#self.data['PPa'].fill_value = 1.  # it appears that this is not a masked column
-		self.data['PPM'].fill_value = 1.
-		self.data['membership'] = np.nan_to_num(self.data['PRV'].filled(), nan=1)*\
-								  np.nan_to_num(self.data['PPa'], nan=1) *\
-								  np.nan_to_num(self.data['PPM'], nan=1)
+
+		df = self.data
+		chi2 = df['PRV'].fillna(0)+df['PPa'].fillna(0)+df['PPM'].fillna(0)
+		p=1-stats.chi2.cdf(chi2, 3)
+		self.data['membership'] = self.data['PRV'].fillna(1)*self.data['PPa'].fillna(1)*self.data['PPM'].fillna(1)
+		self.data['membership'] = np.where((self.data['membership']==0),0, p)
+		self.data['membership'] = np.where((self.data['membership']>0) & (self.data['membership']< 0.01) ,0.01, self.data['membership'])
+		self.data['membership'] = np.where((self.data['membership']>0.99) ,0.99, self.data['membership'])
+
+
 
 	def plotCMD(self, data=None, x1='g_mean_psf_mag', x2='i_mean_psf_mag', y='g_mean_psf_mag', m='membership', savefig=True):
 		if (self.verbose > 0):
@@ -808,34 +674,16 @@ class GaiaClusterMembers(object):
 		ax.plot(data[x1] - data[x2], data[y],'.', color='lightgray')
 
 		#members
-		mask = (data[m] > self.membershipMin)
-		self.get_minMembership(data[mask][y])
-		ax.plot(data[mask][x1] - data[mask][x2], data[mask][y],'.', color='deeppink')
-		ax.set_ylim(max(data[mask][y]), min(data[mask][y]))
+		mask = self.data[self.data['membership'] > 0]
+		#self.get_minMembership(data[mask][y])
+
+		ax.plot(mask[x1] - mask[x2], mask[y],'.', color='deeppink')
+		ax.set_ylim(max(mask[y]), min(mask[y]))
 		#ax.set_xlim(-1, 5)
-		ax.set_xlabel(x1+'-'+x2, fontsize=16)
-		ax.set_ylabel(y, fontsize=16)
+		ax.set_xlabel('G_BP'+'-'+'G_RP', fontsize=16)
+		ax.set_ylabel('G', fontsize=16)
 		if (savefig):
 			f.savefig(self.plotNameRoot + 'CMD.pdf', format='PDF', bbox_inches='tight')
-
-	def addBASE9IDs(self):
-		# sort the data by distance from the (user defined) center and also by magnitude to generate IDs
-		center = SkyCoord(self.RA*units.degree, self.Dec*units.degree, frame='icrs')
-		self.data['coord'] = SkyCoord(self.data['ra'], self.data['dec'], frame='icrs') 
-		self.data['rCenter'] = center.separation(self.data['coord'])
-		# create 10 annuli to help with IDs?
-		# self.data['annulus'] = (np.around(self.data['rCenter'].to(units.deg).value, decimals = 1)*10 + 1).astype(int)
-		# add indices for the radii from the center and g mag for IDs
-		self.data.sort(['rCenter'])
-		self.data['rRank'] = np.arange(0,len(self.data)) + 1
-		self.data.sort(['phot_g_mean_mag'])
-		self.data['gRank'] = np.arange(0,len(self.data)) + 1
-		epoch = 1
-		zfillN = int(np.ceil(np.log10(len(self.data))))
-		self.data['id'] = [int(str(epoch) + str(r).zfill(zfillN) + str(g).zfill(zfillN)) for (r,g) in zip(self.data['rRank'].value, self.data['gRank'].value) ]
-		#self.data['id'] = self.data['source_id']
-
-		self.data.remove_columns(['coord', 'gRank', 'rRank', 'rCenter'])
 
 
 	def generatePhotFile(self):
@@ -846,21 +694,20 @@ class GaiaClusterMembers(object):
 		# would be nice if this was more general and could handle any set of photometry
 
 		# take only those that pass the membership threshold
-		mask = (self.data['membership'] > self.membershipMin) 
-		members = self.data[mask]
-		members['membership'] = ((members['membership']-min(members['membership']))/(max(members['membership'])-min(members['membership']))) \
-		* 0.8 + 0.1
+		members = self.data.loc[self.data['membership'] > 0].copy(deep=True)
+		#members['membership'] = 0.01
+		# members['membership'] = ((members['membership']-min(members['membership']))/(max(members['membership'])-min(members['membership']))) \
+		# * 0.8 + 0.1
 
 		# include only the columns we need in the output table.
 		# Currently I am not including Gaia photometry
 		# If we want to include Gaia photometry, we need to include errors.  
 		# Maybe we can use "typical errors" from here: https://gea.esac.esa.int/archive/documentation/GEDR3/index.html
 		# add the extra columns for BASE-9
-		members['mass1'] = np.zeros(len(members)) + 1.1 #if we know masses, these could be added
-		members['massRatio'] = np.zeros(len(members)) #if we know mass ratios, these could be added
-		members['stage1'] = np.zeros(len(members)) + 1 #set to 1 for MS and giant stars (use 2(?) for WDs)
-		if ('useDBI' not in members.colnames):
-			members['useDBI'] = np.zeros(len(members)) + 1 #set to 1 to use during burn-in.  May want to improve to remove anomalous stars
+		members['mass1'] = 1.1 #if we know masses, these could be added
+		members['massRatio'] = 0.0 #if we know mass ratios, these could be added
+		members['stage1'] = 1 #set to 1 for MS and giant stars (use 2(?) for WDs)
+		members['useDBI'] = 1 #set to 1 to use during burn-in.  May want to improve to remove anomalous stars
 		out = members[['id', 
 					   'phot_g_mean_mag', 'phot_bp_mean_mag', 'phot_rp_mean_mag',
 					   'g_mean_psf_mag', 'r_mean_psf_mag', 'i_mean_psf_mag', 'z_mean_psf_mag', 'y_mean_psf_mag',
@@ -869,43 +716,42 @@ class GaiaClusterMembers(object):
 					   'g_mean_psf_mag_error', 'r_mean_psf_mag_error', 'i_mean_psf_mag_error', 'z_mean_psf_mag_error', 'y_mean_psf_mag_error',
 					   'j_msigcom', 'h_msigcom', 'ks_msigcom',
 					   'mass1', 'massRatio', 'stage1','membership','useDBI'
-					   ]]
+					   ]].copy(deep=True)
 		# rename columns
-		out.rename_column('phot_g_mean_mag', 'G')
-		out.rename_column('phot_bp_mean_mag', 'G_BP') 
-		out.rename_column('phot_rp_mean_mag', 'G_RP')
-		out.rename_column('g_mean_psf_mag', 'g_ps')
-		out.rename_column('r_mean_psf_mag', 'r_ps')
-		out.rename_column('i_mean_psf_mag', 'i_ps')
-		out.rename_column('z_mean_psf_mag', 'z_ps')
-		out.rename_column('y_mean_psf_mag', 'y_ps')
-		out.rename_column('phot_g_mean_mag_error', 'sigG')
-		out.rename_column('phot_bp_mean_mag_error', 'sigG_BP') 
-		out.rename_column('phot_rp_mean_mag_error', 'sigG_RP')
-		out.rename_column('g_mean_psf_mag_error', 'sigg_ps')
-		out.rename_column('r_mean_psf_mag_error', 'sigr_ps')
-		out.rename_column('i_mean_psf_mag_error', 'sigi_ps')
-		out.rename_column('z_mean_psf_mag_error', 'sigz_ps')
-		out.rename_column('y_mean_psf_mag_error', 'sigy_ps')
-		out.rename_column('j_m', 'J_2M')
-		out.rename_column('h_m', 'H_2M')
-		out.rename_column('ks_m', 'Ks_2M')
-		out.rename_column('j_msigcom', 'sigJ_2M')
-		out.rename_column('h_msigcom', 'sigH_2M')
-		out.rename_column('ks_msigcom', 'sigKs_2M')
-		out.rename_column('membership', 'CMprior')
+		out = out.rename(columns={'phot_g_mean_mag':'G'})
+		out = out.rename(columns={'phot_bp_mean_mag':'G_BP'}) 
+		out = out.rename(columns={'phot_rp_mean_mag':'G_RP'})
+		out = out.rename(columns={'g_mean_psf_mag':'g_ps'})
+		out = out.rename(columns={'r_mean_psf_mag':'r_ps'})
+		out = out.rename(columns={'i_mean_psf_mag':'i_ps'})
+		out = out.rename(columns={'z_mean_psf_mag':'z_ps'})
+		out = out.rename(columns={'y_mean_psf_mag':'y_ps'})
+		out = out.rename(columns={'phot_g_mean_mag_error':'sigG'})
+		out = out.rename(columns={'phot_bp_mean_mag_error':'sigG_BP'}) 
+		out = out.rename(columns={'phot_rp_mean_mag_error':'sigG_RP'})
+		out = out.rename(columns={'g_mean_psf_mag_error':'sigg_ps'})
+		out = out.rename(columns={'r_mean_psf_mag_error':'sigr_ps'})
+		out = out.rename(columns={'i_mean_psf_mag_error':'sigi_ps'})
+		out = out.rename(columns={'z_mean_psf_mag_error':'sigz_ps'})
+		out = out.rename(columns={'y_mean_psf_mag_error':'sigy_ps'})
+		out = out.rename(columns={'j_m':'J_2M'})
+		out = out.rename(columns={'h_m':'H_2M'})
+		out = out.rename(columns={'ks_m':'Ks_2M'})
+		out = out.rename(columns={'j_msigcom':'sigJ_2M'})
+		out = out.rename(columns={'h_msigcom':'sigH_2M'})
+		out = out.rename(columns={'ks_msigcom':'sigKs_2M'})
+		out = out.rename(columns={'membership':'CMprior'})
 
 		# impose a floor to phot error to be safe
 		for c in ['sigG', 'sigG_BP', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
-			out[c][(out[c] < self.photSigFloor)] = self.photSigFloor
+			out[c] = np.where((out[c] < self.photSigFloor), self.photSigFloor, out[c])
 
 		# replace any nan or mask values with -9.9 for sig, which BASE9 will ignore
 		for c in ['G', 'G_BP', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
-			out[c].fill_value = 99.9			
-			out[c] = out[c].filled()
+			out[c] = out[c].fillna(99.9)			
 		for c in ['sigG', 'sigG_BP', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
-			out[c].fill_value = -9.9
-			out[c] = out[c].filled()
+			out[c] = out[c].fillna(-9.9)
+
 
 		# expose this so it can be used elsewhere
 		self.members = members
@@ -919,15 +765,15 @@ class GaiaClusterMembers(object):
 			filename = self.photOutputFileName
 
 		idint = list(map(int, out['id']))
-		zfillN = int(np.ceil(np.log10(max(idint)))) 
+		zfillN = int(12) 
 
 		# write to file with proper formatting
 		# fdec = np.abs(np.log10(self.photSigFloor)).astype(int)
 		# ffmt = '%-' + str(fdec + 3) + '.' + str(fdec) + 'f'
 		ffmt = '%-7.4f'
 		with open(filename, 'w', newline='\n') as f:
-			ascii.write(out, delimiter=' ', output=f, format = 'basic', overwrite=True,
-				formats = {'id': '%' + str(2*zfillN + 1) + 's', 
+			ascii.write(Table.from_pandas(out), delimiter=' ', output=f, format = 'basic', overwrite=True,
+				formats = {
 						'G': ffmt, 'G_BP': ffmt, 'G_RP': ffmt, 
 						'g_ps': ffmt, 'r_ps': ffmt, 'i_ps': ffmt, 'z_ps': ffmt, 'y_ps': ffmt, 
 						'J_2M': ffmt, 'H_2M': ffmt, 'Ks_2M': ffmt,
@@ -936,7 +782,8 @@ class GaiaClusterMembers(object):
 						'sigJ_2M': ffmt, 'sigH_2M': ffmt, 'sigKs_2M': ffmt,
 						'mass1': '%-5.3f', 'massRatio': '%-5.3f', 'stage1': '%1i','CMprior': '%-5.3f','useDBI': '%1d'
 						}
-				)
+						)
+			
 
 
 	def generateYamlFile(self):
@@ -998,7 +845,6 @@ class GaiaClusterMembers(object):
 
 	def createInteractiveCMD(self, mag = 'G', color1 = 'G_BP', color2 = 'G_RP', xrng = [0.5,2], yrng = [20,10]):
 		# NOTE: currently this code requires a column in the data labelled as 'membership'
-
 		# create the initial figure
 		TOOLS = "box_zoom, reset, lasso_select, box_select"
 		p = figure(title = "",
@@ -1006,8 +852,9 @@ class GaiaClusterMembers(object):
 			x_range = xrng, y_range = yrng)
 
 		# set all useDBI = 0 to start
+		
 		self.data['useDBI'] = [1]*len(self.data)
-		mask = (self.data['membership'] > self.membershipMin) 
+		mask = (self.data['membership'] > 0) 
 		membershipOrg = self.data['membership'].data.copy() # in case I need to reset
 		# add an index column so that I can map back to the original data
 		self.data['index'] = np.arange(0,len(self.data))
@@ -1074,7 +921,7 @@ class GaiaClusterMembers(object):
 			slider.value = 0.01  
 			self.data['useDBI'] = [0]*len(self.data)
 			self.data['membership'] = membershipOrg
-			mask = (self.data['membership'] > self.membershipMin)
+			mask = (((self.data['PRV'] >= self.RV_memmin) & (self.data['PPa'] >= self.Pa_memmin)) & (self.data['PPM'] >= self.PM_memmin))
 			sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
 		resetButton.on_click(resetCallback)
 
@@ -1102,7 +949,7 @@ class GaiaClusterMembers(object):
 			if (len(sourcePhot.selected.indices) > 0):
 				indices = sourcePhot.data['index'][sourcePhot.selected.indices]
 				self.data['membership'][indices] = -1
-				mask = (self.data['membership'] > self.membershipMin)
+				mask = (((self.data['PRV'] >= self.RV_memmin) & (self.data['PPa'] >= self.Pa_memmin)) & (self.data['PPM'] >= self.PM_memmin))
 				sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
 				# reset
 				sourcePhot.selected.indices = []
@@ -1279,12 +1126,14 @@ class GaiaClusterMembers(object):
 			x_range = xrng, y_range = yrng)
 
 
-		mask = (self.data['membership'] > self.membershipMin) 
-		membershipOrg = self.data['membership'].data.copy() # in case I need to reset
 
+		self.df = self.data
+		self.table = Table.from_pandas(self.df)
+		mask = (self.df['membership'] > 0)
+		membershipOrg = self.df['membership'] # in case I need to reset
 		# add an index column so that I can map back to the original data
-		self.data['index'] = np.arange(0, len(self.data))
-
+		self.table['index'] = np.arange(0, len(self.data))
+		self.df['index'] = np.arange(0, len(self.df))
 		# get the isochrone at the desired age and metallicity
 		iso = self.interpolateModel(initialGuess[0], initialGuess[1], isochroneFile, mag = mag, color1 = color1, color2 = color2)
 
@@ -1306,7 +1155,9 @@ class GaiaClusterMembers(object):
 
 
 		# define the input for Bokeh
-		sourcePhot = ColumnDataSource(data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index']))
+		sourcePhot = ColumnDataSource(data = dict(x = self.df[mask][color1] - self.df[mask][color2], y = self.df[mask][mag], index = self.df[mask]['index']))
+		mask = (self.table['membership'] > 0)
+		oldsourcePhot = ColumnDataSource(data = dict(x = self.table[mask][color1] - self.table[mask][color2], y = self.table[mask][mag], index = self.table[mask]['index']))
 		sourceCluster = ColumnDataSource(data = dict(logAge = [initialGuess[0]], Fe_H = [initialGuess[1]], distMod = [initialGuess[2]], Av = [initialGuess[3]]))
 		sourceIso = ColumnDataSource(getObsIsochrone(iso, sourceCluster.data['distMod'][0], sourceCluster.data['Av'][0]))
 
@@ -1363,11 +1214,15 @@ class GaiaClusterMembers(object):
 		def deleteCallback(event):
 			# set the membership to -1, redefine the mask, and remove them from the columnDataSource
 			if (len(sourcePhot.selected.indices) > 0):
-				indices = sourcePhot.data['index'][sourcePhot.selected.indices]
-				self.data['membership'][indices] = -1
-				mask = (self.data['membership'] > self.membershipMin)
-				sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
+				indices = oldsourcePhot.data['index'][sourcePhot.selected.indices]
+				self.table['membership'][indices] = -1
+				del_ids = self.table['id'][self.table['index'][indices]]
+				self.df['membership'][self.df['id'].isin(del_ids)] = -1
+				mask = (self.df['membership'] > 0 )
+				sourcePhot.data = dict(x = self.df[mask][color1] - self.df[mask][color2], y = self.df[mask][mag], index = self.df[mask]['index'])
 				# reset
+				mask = (self.table['membership'] > 0 )
+				oldsourcePhot.data = dict(x = self.table[mask][color1] - self.table[mask][color2], y = self.table[mask][mag], index = self.table[mask]['index'])
 				sourcePhot.selected.indices = []
 
 		deleteButton.on_click(deleteCallback)
@@ -1376,9 +1231,9 @@ class GaiaClusterMembers(object):
 		resetButton = Button(label = "Reset",  button_type = "warning", )
 
 		def resetCallback(event):
-			self.data['membership'] = membershipOrg
-			mask = (self.data['membership'] > self.membershipMin)
-			sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
+			self.df['membership'] = membershipOrg
+			mask = (self.df['membership'] > 0)
+			sourcePhot.data = dict(x = self.df[mask][color1] - self.df[mask][color2], y = self.df[mask][mag], index = self.df[mask]['index'])
 
 		resetButton.on_click(resetCallback)
 
@@ -1415,7 +1270,9 @@ class GaiaClusterMembers(object):
 			self.generateYamlFile()
 			print('Files saved : ', self.photOutputFileName, self.yamlOutputFileName) 
 
+
 		writeButton.on_click(writeCallback)
+
 		###########################
 		# layout
 		# plot on the left, buttons on the right
@@ -1442,42 +1299,52 @@ class GaiaClusterMembers(object):
 			<li>When finished, click the "Write files" button output the results.</li>\
 		</ul>')
 
-		layout = column(title, instructions, row(p, buttons))
 
+		layout = column(title, instructions, row(p, buttons))
 		return(layout)
 
+	def runAll(self, clusterName, filename=None):
+		OCdf = pd.read_csv('OCcompiled_clean_v2.csv')
+		row = OCdf.loc[OCdf['ID'] == clusterName].iloc[0]
 
-	def runAll(self, clusterName, rt, filename=None):
+		# get the cluster center
+		self.center = SkyCoord(row['RA[hr]'], row['Dec[deg]'], unit=(units.hourangle, units.degree))
+		self.RA = self.center.ra.to(units.degree).value
+		self.Dec = self.center.dec.to(units.degree).value
+		#self.center = center.ra.to(units.degree).value
+		#calculate the distance modulus and error
+		dmod = 5.*np.log10(row['dist[pc]']) - 5.
+		err_dmod = (5.*1./np.log(10.)*(1./row['dist[pc]']))*row['err_dist[pc]'] # error propagation
+		# estimate the cluster tidal radius 
+		# equation from Binney and Tremaine for Jacoby Radius (8.91)
+		# want this in degrees
+		Mg = 1.5*10**12 #*units.solMass #this probably could use verification and a reference
+		self.rt = row['rgc[pc]']*(row['mass[Msun]']/(3.*Mg))**(1./3.)
+		self.pass_no = 1
 		if filename is not None:
-			self.readDataFromFile(filename)
+			rtfac = .5
+			self.radius = rtfac*np.arctan2(self.rt, row['dist[pc]'])*180./np.pi
+			print ('Radius=', self.radius)
+			self.readDataFromFile(clusterName, filename)
 		else:
-			self.getData()
-			self.addBASE9IDs()
+			rtfac = 5
+			self.radius = rtfac*np.arctan2(self.rt, row['dist[pc]'])*180./np.pi
+			print ('Getting data from a radius of',self.radius,' deg')
+			self.getData(clusterName)
 		self.getRVMembers(clusterName)
 		self.getParallaxMembers(clusterName)
-		if clusterName == 'M_35':
-			self.getM35PMMembers(clusterName)
-		else:
-			self.getPMMembers(clusterName)
-		self.combineMemberships()
-		self.get_coreRadius(rt)
-		print ('Old r=',self.radius)
-		if self.radius < self.r_tide :
-			self.radius = min(np.arctan2(30.,self.distance)*57.3, self.r_tide) #10core radius or tidal radius
-			print ('New r=',self.radius)
-			self.getData()
-			self.addBASE9IDs()
-			self.getRVMembers(clusterName)
-			self.getParallaxMembers(clusterName)
-			if clusterName == 'M_35':
-				self.getM35PMMembers(clusterName)
-			else:
-				self.getPMMembers(clusterName)
-			self.combineMemberships()
-			self.get_coreRadius(rt)
+		self.getPMMembers(clusterName) #Memberships combined in PM functions
+		self.get_coreRadius()
+		self.pass_no = 2
+		self.readDataFromFile(clusterName, clusterName+'_dir/'+clusterName+'_GaiaData.ecsv')
+		self.getRVMembers(clusterName)
+		self.getParallaxMembers(clusterName)
+		self.getPMMembers(clusterName)
+		self.get_coreRadius()
 		self.plotCMD(y = 'phot_g_mean_mag', x1 = 'phot_bp_mean_mag', x2 = 'phot_rp_mean_mag')
 		self.generatePhotFile()
 		self.generateYamlFile()
-		self.saveDataToFile()
+		print ('Final r_core=',self.r_core)
+		self.saveDataToFile(clusterName+'_dir/'+clusterName+'.csv')
 		if (self.verbose > 0):
 			print("done.")
