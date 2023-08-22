@@ -6,6 +6,7 @@ from astropy.modeling import models, fitting
 from astropy.table import Table, Column, vstack, MaskedColumn
 import astropy.units as units
 from astropy.coordinates import SkyCoord
+from dustmaps.bayestar import BayestarWebQuery
 from astropy.io import ascii
 import scipy.stats
 import scipy.optimize
@@ -29,28 +30,23 @@ from astropy.table import Table, join, hstack
 from scipy.integrate import quad
 from matplotlib.patches import Polygon
 from scipy import stats
+import matplotlib as mpl
 
 
-def gauss(x, A, mu, sigma):
+def gauss(x, A, mu, sigma): #single Gaussian function
 	return A*np.exp(-(x-mu)**2/(2*sigma**2))
-def bi_norm(x, *args):
+
+def bi_norm(x, *args):  #double Gaussian function
 	A1, m1, s1, A2, m2,s2 = args
-	#ret = A1*scipy.stats.norm.pdf(x, loc=m1 ,scale=s1) + A2*scipy.stats.norm.pdf(x, loc=m2 ,scale=s2)
 	ret = gauss(x,A1,m1,s1)+gauss(x,A2,m2,s2)
 	return ret
-def tri_norm(x, *args):
+def tri_norm(x, *args):  #triple Gaussian function
 	A1, m1, s1, A2, m2,s2, A3, m3,s3 = args
 	ret = A1*scipy.stats.norm.pdf(x, loc=m1 ,scale=s1)
 	ret += A2*scipy.stats.norm.pdf(x, loc=m2 ,scale=s2)
 	ret += A3*scipy.stats.norm.pdf(x, loc=m3 ,scale=s3)
 	return ret
-def quad_norm(x, *args):
-	m1, s1, A1, m2,s2, A2, m3,s3, A3, m4,s4, A4 = args
-	ret = A1*scipy.stats.norm.pdf(x, loc=m1 ,scale=s1)
-	ret += A2*scipy.stats.norm.pdf(x, loc=m2 ,scale=s2)
-	ret += A3*scipy.stats.norm.pdf(x, loc=m3 ,scale=s3)
-	ret += A4*scipy.stats.norm.pdf(x, loc=m4 ,scale=s4)
-	return ret
+
 
 class GaiaClusterMembers(object):
 	'''
@@ -61,7 +57,7 @@ class GaiaClusterMembers(object):
 	
 	'''
 	
-	def __init__(self, RA = None, Dec = None, radius = 1, **kwargs):
+	def __init__(self, RA = None, Dec = None, radius = 1, **kwargs): #Query Gaia catalog
 		
 		# required inputs
 		self.RA = RA # degrees
@@ -70,8 +66,6 @@ class GaiaClusterMembers(object):
 		# radius of the area to return
 		self.radius = radius # degrees
 
-		# catalogs (when DR3 comes out, we will change that to the default)
-		# self.catalog = "gaiadr2.gaia_source" 
 		self.GaiaCatalog = "gaiadr3.gaia_source" 
 		self.PanSTARRSMatchCatalog = "gaiadr3.panstarrs1_best_neighbour"
 		self.PanSTARRSCatalog = "gaiadr2.panstarrs1_original_valid"
@@ -103,6 +97,7 @@ class GaiaClusterMembers(object):
 			'gaia.phot_rp_mean_mag',
 			'gaia.phot_rp_mean_flux_over_error',
 			'gaia.parallax',
+			'gaia.parallax_error',
 			'gaia.teff_gspphot',
 			'gaia.ruwe',
 			'best.number_of_neighbours',
@@ -126,8 +121,7 @@ class GaiaClusterMembers(object):
 		]
 
 
-		self.Gmag_max = 16
-		self.Gmag_min = 0
+		self.deredden = 1 #To apply reddening corrections from the Bayestar dustmap, set self.deredden =1.  Otherwise, set self.deredden=0.
 
 		# initial guesses for membership
 		self.RVmin = -100. #km/s
@@ -151,8 +145,8 @@ class GaiaClusterMembers(object):
 		self.r_core = 0
 		self.fitter = fitting.LevMarLSQFitter()
 
+
 		self.photSigFloor = 0.02 # floor to the photometry errors for the .phot file
-		#self.sig_fac = 3
 		# output
 		self.SQLcmd = ''
 		self.data = None # will be an astropy table
@@ -207,17 +201,17 @@ class GaiaClusterMembers(object):
 		# Redenning coefficients
 		# from BASE-9 Filters.cpp
 		absCoeffs0 = {
-			"G":      0.86105,
-			"G_BP":   1.07185,
-			"G_RP":   0.65069,
-			"g_ps":   1.16529,
-			"r_ps":   0.86813,
-			"i_ps":   0.67659,
-			"z_ps":   0.51743,
-			"y_ps":   0.43092,
-			"J_2M":   0.29434,
-			"H_2M":   0.18128,
-			"Ks_2M":  0.11838,
+         "G":   0.83627 ,
+         "G_BP": 1.08337 ,
+         "G_RP": 0.63439 ,
+         "g_ps": 1.17994 ,
+         "r_ps": 0.86190 ,
+         "i_ps": 0.67648 ,
+         "z_ps": 0.51296 ,
+         "y_ps": 0.42905 ,
+         "J_2M":  0.28665 ,
+         "H_2M":  0.18082 ,
+         "Ks_2M": 0.11675 ,
 		}
 		self.absCoeffs = {}
 		for key, value in absCoeffs0.items():
@@ -247,7 +241,8 @@ class GaiaClusterMembers(object):
 		f"AND gaia.pmra IS NOT NULL AND abs(gaia.pmra)>0 " + \
 		f"AND gaia.pmdec IS NOT NULL AND abs(gaia.pmdec)>0;"
 
-		#print (self.ADQLcmd)
+
+		print (self.ADQLcmd)
 
 		if (self.verbose > 1):
 			print(self.ADQLcmd)
@@ -267,12 +262,39 @@ class GaiaClusterMembers(object):
 		self.data['coord'] = SkyCoord(self.data['ra'], self.data['dec'], frame='icrs') 
 		self.data['rCenter'] = self.center.separation(self.data['coord'])
 		self.data['id'] = self.data['source_id']
-		self.data['parallax'] = (self.data['parallax']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
-
+		self.data['distance'] = (self.data['parallax']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
+		self.data['distance_error'] = (self.data['parallax_error']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
 		self.data = self.data.to_pandas()
+		self.red = True
+		self.getParallaxMembers(clusterName)
+		print ('Parallax mean =', self.pa_fit.parameters[1])
+		print ('Getting differential reddening E(B-V) values...')
+		bayestar = BayestarWebQuery(version='bayestar2019')
+		reddening = []
+		samples = []
+		for i in range(1,5):
+			size = int(len(self.data)/4)
+			start = (i-1)*size
+			stop = i*size
+			if i == 4:
+				ra = self.data['ra'][start:]
+				dec = self.data['dec'][start:]
+			else:
+				ra = self.data['ra'][start:stop]
+				dec = self.data['dec'][start:stop]
+			d = [self.pa_fit.parameters[1]]*len(ra)
+			coords = SkyCoord(ra=ra*units.deg, dec=dec*units.deg,
+			                   distance=d*units.pc, frame='icrs')
+			reddening.append(bayestar(coords, mode='median'))
+			percentiles = bayestar(coords, mode='percentile', pct=[16,84])
+			samples.append([x[-1]-x[0] for x in percentiles])
+		self.data['sig_E(B-V)'] = np.concatenate(samples)
+		self.data['E(B-V)'] = np.concatenate(reddening)
 		self.saveDataToFile(clusterName+'_dir/'+clusterName+'_GaiaData.ecsv')
 		if (self.verbose > 2):
 			print(self.data)
+
+
 
 
 	def saveDataToFile(self, filename=None):
@@ -282,10 +304,8 @@ class GaiaClusterMembers(object):
 
 		if (self.verbose > 0):
 			print(f"Saving data to file {filename} ... ")
-		#try:
 		self.data.to_csv(filename, sep=' ',index=False)  
-		#except:
-		#	self.data.write(filename, overwrite=True) 
+
 
 	def readDataFromFile(self, clusterName, filename=None):
 		# read and save the data from an ecsv file
@@ -294,36 +314,58 @@ class GaiaClusterMembers(object):
 
 		if (self.verbose > 0):
 			print(f"Reading data from file {filename} ... ")
-
-		#self.data = ascii.read(filename)  
 		self.data = pd.read_csv(filename,sep=' ')
-		# self.data  = Table(self.data, masked=True, copy=False)
-		# self.data['coord'] = SkyCoord(self.data['ra'], self.data['dec'], frame='icrs') 
-		# self.data['rCenter'] = self.center.separation(self.data['coord'])
-		# #self.data['id'] = [int(str(x)[-15:]) for x in self.data['source_id']]
-		# self.data['id'] = self.data['source_id']
-		# self.data['parallax'] = (self.data['parallax']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
+		if self.deredden == 1:
+			absCoeffs0 = {
+				"G":   0.83627 ,
+				"G_BP": 1.08337 ,
+				"G_RP": 0.63439 ,
+				"g_ps": 1.17994 ,
+				"r_ps": 0.86190 ,
+				"i_ps": 0.67648 ,
+				"z_ps": 0.51296 ,
+				"y_ps": 0.42905 ,
+				"J_2M":  0.28665 ,
+				"H_2M":  0.18082 ,
+				"Ks_2M": 0.11675 ,
+				}
+			med_red = np.mean(self.data['E(B-V)'])
+			self.data['g_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['g_ps'])
+			self.data['r_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['r_ps'])
+			self.data['i_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['i_ps'])
+			self.data['z_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['z_ps'])
+			self.data['y_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['y_ps'])
+			self.data['phot_g_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G'])
+			self.data['phot_bp_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G_BP'])
+			self.data['phot_rp_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G_RP'])
+			self.data['j_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['J_2M'])
+			self.data['h_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['H_2M'])
+			self.data['ks_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['Ks_2M'])
+
+			#add error from reddening in quadrature
+			var = np.std(self.data['E(B-V)'])**2
+			self.data['g_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['g_ps'])**2+self.data['g_mean_psf_mag_error']**2)
+			self.data['r_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['r_ps'])**2+self.data['r_mean_psf_mag_error']**2)
+			self.data['i_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['i_ps'])**2+self.data['i_mean_psf_mag_error']**2)
+			self.data['z_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['z_ps'])**2+self.data['z_mean_psf_mag_error']**2)
+			self.data['y_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['y_ps'])**2+self.data['y_mean_psf_mag_error']**2)
+			self.data['phot_g_mean_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G'])**2+self.data['phot_g_mean_mag_error']**2)
+			self.data['phot_bp_mean_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G_BP'])**2+self.data['phot_bp_mean_mag_error']**2)
+			self.data['phot_rp_mean_mag_eror']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G_RP'])**2+self.data['phot_rp_mean_mag_error']**2)
+			self.data['j_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['J_2M'])**2+self.data['j_msigcom']**2)
+			self.data['h_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['H_2M'])**2+self.data['h_msigcom']**2)
+			self.data['ks_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['Ks_2M'])**2+self.data['ks_msigcom']**2)
+		else:
+			print ('No reddening  corrections applied')
 		if self.pass_no == 1:
 			self.data = self.data[self.data['rCenter'] <= self.radius]
-		# self.data = self.data.to_pandas()
-		self.data = self.data.drop_duplicates(keep='first')
-		# sigmaG_0 = 0.0027553202
-		# sigmaGBP_0 = 0.0027901700
-		# sigmaGRP_0 = 0.0037793818
-		# self.data['phot_g_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_g_mean_flux_over_error'])**2 + sigmaG_0**2)**0.5
-		# self.data['phot_bp_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_bp_mean_flux_over_error'])**2 + sigmaGBP_0**2)**0.5
-		# self.data['phot_rp_mean_mag_error'] = ((-2.5/np.log(10)/self.data['phot_rp_mean_flux_over_error'])**2 + sigmaGRP_0**2)**0.5
 
-		#self.saveDataToFile(clusterName+'_dir/'+clusterName+'_GaiaData.ecsv')
-		# if self.pass_no == 1:
-		# 	self.data = self.data['distance'] < xs
+		self.data = self.data.drop_duplicates(keep='first')
+
 
 	def get_coreRadius(self):
 		mask = (self.data['membership']>0)
 		members = self.data[mask]
-		#center = SkyCoord(self.RA*units.deg, self.Dec*units.deg, frame='icrs')
-		# members['coord'] = SkyCoord(members['ra'], members['dec'], frame='icrs') 
-		# members['rCenter'] = self.center.separation(members['coord']).to(units.arcmin)
 
 		# get the histogram of radial values
 		# set the radial bins (in arcmin)
@@ -346,7 +388,8 @@ class GaiaClusterMembers(object):
 		# make sure that the errors are always non-zero (not sure the best approach here)
 		xx = np.where(err_sdensity == 0)
 		err_sdensity[xx] = 1./sarea[xx]
-		        # fit a King model
+		
+		# fit a King model
 		p_init = models.KingProjectedAnalytic1D(max(sdensity), np.median(bin_centers), self.rt)
 		fit_p = self.fitter
 		king = fit_p(p_init, bin_centers, sdensity, weights = 1.0/err_sdensity)
@@ -354,6 +397,7 @@ class GaiaClusterMembers(object):
 		params = king.parameters
 		self.r_core = float(params[1])/60.
 		self.r_tide = float(params[2])/60.
+
 
 	def getRVMembers(self, clusterName, savefig=True):
 		# calculate radial-velocity memberships
@@ -376,19 +420,9 @@ class GaiaClusterMembers(object):
 				p_init = models.Gaussian1D(np.max(hrv), -10, 20) +\
 				models.Gaussian1D(np.max(hrv), RVguess, 10)
 
-		# if self.pass_no == 2:
-		# 	if clusterName == 'M_35':
-		# 		p_init = models.Gaussian1D(300, -10, 1)+\
-		# 		models.Gaussian1D(np.max(hrv), RVguess, 5)
-		# 	else:
-		# 		p_init = models.Gaussian1D(np.max(hrv), self.rv_fit.parameters[1], self.rv_fit.parameters[2]) \
-		# 				+ models.Gaussian1D(np.max(hrv)*.8, self.rv_fit.parameters[4], self.rv_fit.parameters[5])
-
-
 
 			fit_p = self.fitter
 			rvG1D = fit_p(p_init, brv[:-1], hrv)
-			#if self.pass_no == 1:
 			self.rv_fit = rvG1D
 		if self.pass_no ==2:
 			rvG1D = self.rv_fit
@@ -398,44 +432,48 @@ class GaiaClusterMembers(object):
 
 		mean = self.rv_fit.parameters[1]
 		sig = self.rv_fit.parameters[2]
-
+		RV_sigfac = self.sig_fac
 
 		self.data['PRV'] = (self.data['radial_velocity'] - mean)**2/(sig**2)
-		self.data['PRV'] = np.where(((self.data['radial_velocity'] > mean+self.sig_fac*sig) & (np.isnan(self.data['radial_velocity'])==False)) | ((self.data['radial_velocity'] < mean-self.sig_fac*sig) & (np.isnan(self.data['radial_velocity'])==False)), 0, self.data['PRV'])
-		if clusterName == 'M_21':
+		self.data['PRV'] = np.where(((self.data['radial_velocity'] > mean+RV_sigfac*sig) & (np.isnan(self.data['radial_velocity'])==False)) | ((self.data['radial_velocity'] < mean-RV_sigfac*sig) & (np.isnan(self.data['radial_velocity'])==False)), 0, self.data['PRV'])
+		if clusterName == 'M_21' or clusterName == 'NGC_2264':
 			self.data['PRV'] = 1
 		if (self.createPlots):
+
+			font = {'family' : 'Times New Roman',
+			    'weight' : 'normal',
+			    'size'   : 15}
+			plt.rc('font', **font)
+			plt.rc('text', usetex=True)
+			fig = plt.figure(figsize=(10,10))
+			fig.patch.set_color('white')
 			hrv, brv = np.histogram(x, bins = self.RVbins, range=(self.RVmin, self.RVmax))
 			xf = np.linspace(self.RVmin, self.RVmax, self.RVbins*10)
-			f, ax = plt.subplots()
+			fig, ax = plt.subplots()
 			ax.step(brv[:-1],hrv, color='black')
-			ax.plot(xf,bi_norm(xf,*rvG1D.parameters), color='deeppink', lw=3)
-			plt.plot([mean,mean],[0,max(hrv)],color='black')
-			plt.plot([mean-self.sig_fac*sig,mean-self.sig_fac*sig],[0,max(hrv)],color='gray',lw=3)
-			plt.plot([mean+self.sig_fac*sig,mean+self.sig_fac*sig],[0,max(hrv)],color='gray',lw=3)
+			ax.plot(xf,bi_norm(xf,*rvG1D.parameters), color='gray',lw=3)
+			plt.plot([mean-RV_sigfac*sig,mean-RV_sigfac*sig],[0,max(hrv)],color='gray',lw=3)
+			plt.plot([mean+RV_sigfac*sig,mean+RV_sigfac*sig],[0,max(hrv)],color='gray',lw=3)
 			plt.plot()
 			foo = models.Gaussian1D(*rvG1D.parameters[0:3])
-			ax.plot(xf, foo(xf), color='gray')
+			ax.plot(xf, foo(xf), color='deeppink', lw=3)
 			foo = models.Gaussian1D(*rvG1D.parameters[3:])
 			ax.plot(xf, foo(xf), color='darkslateblue', ls='dashed')
-			ax.set_xlabel(r'RV (km s$^{-1}$)', fontsize = 16)
-			ax.set_ylabel('N', fontsize = 16)
+			ax.set_xlabel(r'RV (km/s', fontsize = 30)
+			ax.set_ylabel('N', fontsize = 30)
 			ax.axvline(rvG1D.parameters[1], color='tab:purple', ls='dotted')
 			ax.annotate(f'RV = {rvG1D.parameters[1]:.1f} km/s', (rvG1D.parameters[1] + 0.05*(self.RVmax - self.RVmin), 0.95*max(hrv)) )
 
-
 			if (savefig):
-				f.savefig(self.plotNameRoot + 'RVHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
+				fig.savefig(self.plotNameRoot + 'RVHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
 			
-
 
 
 	def getParallaxMembers(self, clusterName, savefig=True):
 		# estimate memberships based on distance (could use Bailer Jones, but this simply uses inverted parallax)
 		if (self.verbose > 0):
 			print("Finding parallax members ... ")
-			
-		x = self.data['parallax']
+		x = self.data['distance']
 		hpa, bpa = np.histogram(x, bins = self.dbins, range=(self.dmin, self.dmax))
 
 		#fit
@@ -459,10 +497,10 @@ class GaiaClusterMembers(object):
 			pa1D = self.pa_fit
 		mean = pa1D.parameters[1]
 		sig = pa1D.parameters[2]
-		self.data['PPa'] = (self.data['parallax'] - mean)**2/(sig**2)
+		self.data['PPa'] = (self.data['distance'] - mean)**2/(sig**2)
 		if clusterName != 'NGC_6791':
-			self.data['PPa'] = np.where(((self.data['parallax'] > mean+self.sig_fac*sig)  & (np.isnan(self.data['parallax'])==False)) \
-			 | ((self.data['parallax'] < mean-self.sig_fac*sig) & (np.isnan(self.data['parallax'])==False)), 0, self.data['PPa'])
+			self.data['PPa'] = np.where(((self.data['distance'] > mean+self.sig_fac*sig)  & (np.isnan(self.data['distance'])==False)) \
+			 | ((self.data['distance'] < mean-self.sig_fac*sig) & (np.isnan(self.data['distance'])==False)), 0, self.data['PPa'])
 		else:
 			self.data['PPa'] = 1
 		if (self.createPlots):
@@ -470,21 +508,21 @@ class GaiaClusterMembers(object):
 			xf = np.linspace(self.dmin, self.dmax, self.dbins*10)
 			f,ax = plt.subplots()
 			ax.step(bpa[:-1],hpa, color='black')
-			ax.plot(xf,pa1D(xf), color='deeppink', lw=5)
+			ax.plot(xf,pa1D(xf), color='gray', lw=3)
 			if clusterName == 'NGC_6791':
 				ax.plot(xf,pa1D(xf), color='gray')
 			else:
 				foo = models.Gaussian1D(*pa1D.parameters[0:3])
-				ax.plot(xf, foo(xf), color='gray')
-			ax.plot([mean,mean],[0,max(hpa)],color='black',lw=3)
+				ax.plot(xf, foo(xf), color='deeppink', lw=3)
 			ax.plot([mean-self.sig_fac*sig, mean-self.sig_fac*sig],[0,max(hpa)],color='gray',lw=3)
 			ax.plot([mean+self.sig_fac*sig, mean+self.sig_fac*sig],[0,max(hpa)],color='gray',lw=3)
 			foo = models.Polynomial1D(degree=self.dPolyD)
 			ax.plot(xf, foo.evaluate(xf,*pa1D.parameters[3:]), color='darkslateblue', ls='dashed')
-			ax.set_xlabel('distance (pc)', fontsize = 16)
-			ax.set_ylabel('N', fontsize = 16)
+			ax.set_xlabel('Distance (pc)', fontsize = 30)
+			ax.set_ylabel('N', fontsize = 30)
+			ax.set_title('NGC 2682', fontsize=30)
 			ax.axvline(pa1D.parameters[1], color='tab:purple', ls='dotted')
-			ax.annotate(f'd = {pa1D.parameters[1]:.1f} pc', (pa1D.parameters[1] + 0.05*(self.dmax - self.dmin), 0.95*max(hpa)) )
+			ax.annotate(f'd = {pa1D.parameters[1]:.1f} pc', (pa1D.parameters[1] + 0.1*(self.dmax - self.dmin), 0.95*max(hpa)), fontsize=20)
 			if (savefig):
 				f.savefig(self.plotNameRoot + 'dHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
 
@@ -570,34 +608,25 @@ class GaiaClusterMembers(object):
 			self.PMymax=self.y_params[2]		
 			self.PM_ra_fit = self.x_params[0][:3]
 			self.PM_dec_fit = self.y_params[0][:3]
-		# if self.pass_no == 2 :
-		# 	x_params[0][:3] = self.PM_ra_fit
-		# 	y_params[0][:3] = self.PM_dec_fit
+
 		xmean = self.PM_ra_fit[1]
 		xsig = self.PM_ra_fit[2]
 		ymean = self.PM_dec_fit[1]
 		ysig = self.PM_dec_fit[2]
 
-
-		#self.data['PPM']=self.data['PM_ra']+self.data['PM_dec']
-
-		# self.data['PPM'] = self.data['ra']*0
-		# self.data['PM_ra'] = self.data['ra']*0
-		# self.data['PM_dec'] = self.data['ra']*0
 		self.data['PM_ra']=(self.data['pmra']- xmean)**2/(xsig**2) 
 		self.data['PM_dec']=(self.data['pmdec'] - ymean)**2/(ysig**2)
 		self.data['PM_ra'] = np.where((self.data['pmra'] > xmean+self.sig_fac*xsig) | (self.data['pmra'] < xmean-self.sig_fac*xsig), 0, self.data['PM_ra'])
 		self.data['PM_dec']=np.where((self.data['pmdec'] > ymean+self.sig_fac*ysig) | (self.data['pmdec'] < ymean-self.sig_fac*ysig), 0, self.data['PM_dec'])
 		PPM1 = self.data['PM_ra']*self.data['PM_dec']
 		PPM2 =self.data['PM_ra']+self.data['PM_dec']
-		#self.data['PPM'] =[min(PPM1[i],PPM2[i]) for i in range(len(self.data))]
 		self.data['PPM'] = PPM1
 
 		self.combineMemberships()
 		if (self.verbose > 1):
 			print(x_params,y_params)
 		if (self.createPlots):
-			f = plt.figure(figsize=(8, 8)) 
+			fig = plt.figure(figsize=(8, 8)) 
 			gs = gridspec.GridSpec(2, 2, height_ratios = [1, 3], width_ratios = [3, 1]) 
 			ax1 = plt.subplot(gs[0])
 			ax2 = plt.subplot(gs[2])
@@ -607,45 +636,49 @@ class GaiaClusterMembers(object):
 			hx1D, x1D = np.histogram(x,bins=self.PMxbins,range=(self.PMxmin,self.PMxmax))
 			xf = np.linspace(self.PMxmin,self.PMxmax,self.PMxbins)
 			ax1.step(x1D[:-1], hx1D, color='black')
-			ax1.plot(xf, tri_norm(xf, *self.x_params[0]), color='deeppink', lw=3)
-			ax1.plot(xf, gauss(xf, *self.x_params[0][:3]), color='gray')
-			ax1.plot([xmean, xmean],[0,max(hx1D)],lw=3,color='black')
+			#ax1.plot(xf, tri_norm(xf, *self.x_params[0]), color='deeppink', lw=3)
+			ax1.plot(xf, gauss(xf, *self.x_params[0][:3]), color='deeppink')
+			ax1.plot([xmean, xmean],[0,max(hx1D)],lw=2,color='gray',ls='dotted')
 			ax1.plot([xmean-self.sig_fac*xsig, xmean-self.sig_fac*xsig],[0,max(hx1D)],lw=3,color='gray')
 			ax1.plot([xmean+self.sig_fac*xsig, xmean+self.sig_fac*xsig],[0,max(hx1D)],lw=3,color='gray')
-			#ax1.plot(xf, bi_norm(xf, *x_params[0][:6]), color='darkslateblue', ls='dashed')
-			ax1.axvline(self.x_params[0][0],color='tab:purple', ls='dotted')
-			#ax1.annotate(r'$\mu_\alpha$ =' + f'{x_params[0][0]:.1f}' + r'mas yr$^{-1}$', (x_params[0][0] + 0.05*(x_params[2] - x_params[1]), 0.95*max(hx1D)) )
+			ax1.annotate(r'$\mu_\alpha$ =' + str(round(xmean,2)) + r' (mas yr$^{-1}$)', (xmean+2, .9*max(hx1D)),fontsize=20) 
 			ax1.set_ylim(-.05*max(hx1D),max(hx1D)+.1*max(hx1D))
 
 			hy1D, y1D = np.histogram(y,bins=self.PMybins,range=(self.PMymin,self.PMymax))
 			yf = np.linspace(self.PMymin,self.PMymax,200)
 			ax3.step(hy1D, y1D[:-1], color='black')
-			ax3.plot(tri_norm(yf, *self.y_params[0]),yf, color='deeppink', lw=3)
-			ax3.plot(gauss(yf, *self.y_params[0][0:3]),yf, color='gray')
+			ax3.plot(gauss(yf, *self.y_params[0][0:3]),yf, color='deeppink')
 
 			ax3.plot([0,max(hy1D)],[ymean-self.sig_fac*ysig, ymean-self.sig_fac*ysig],lw=3,color='gray')
 			ax3.plot([0,max(hy1D)],[ymean+self.sig_fac*ysig, ymean+self.sig_fac*ysig],lw=3,color='gray')
-			#ax3.plot(bi_norm(yf, *y_params[0][:6]),yf, color='darkslateblue', ls='dashed')
+
 			ax3.axhline(self.y_params[0][0],color='tab:purple', ls='dotted')
-			#ax3.annotate(r'$\mu_\alpha$ =' + f'{y_params[0][0]:.1f}' + r'mas yr$^{-1}$',(0.95*max(hy1D), y_params[0][0] + 0.05*(y_params[2] - y_params[1])), rotation=90)
+			ax3.plot([0,max(hy1D)], [ymean, ymean],lw=2,color='gray',ls='dotted')
+			ax3.annotate(r'$\mu_\delta$ =' + str(round(ymean,2)) + r' (mas yr$^{-1}$)',(0.85*max(hy1D), -23), rotation=270,fontsize=20)
 			ax3.set_xlim(-.05*max(hy1D),max(hy1D)+.1*max(hy1D))
+
+
+			# cs = ax2.hist2d(x,y,bins=(500,500),norm=mpl.colors.LogNorm(),cmap=plt.cm.Blues,label='Count')#, range=[[-1,1],[-1,1]]) #These two lines will produce a 2D-hist rather than the scatter plot below
+			# fig.colorbar(cs[3],ax=ax3,label='N')
 
 			ax2.scatter(x,y,color='darkgray',marker='.')
 			ax2.scatter(x[self.data['PPM'] > 0], y[self.data['PPM'] > 0], color='cyan', marker='.')
+
 
 			ax1.set_xlim(self.PMxmin, self.PMxmax)
 			ax2.set_xlim(self.PMxmin, self.PMxmax)
 			ax2.set_ylim(self.PMymin, self.PMymax)
 			ax3.set_ylim(self.PMymin, self.PMymax)
-			ax2.set_xlabel(r'$\mu_\alpha$ (mas yr$^{-1}$)', fontsize=16)
-			ax2.set_ylabel(r'$\mu_\delta$ (mas yr$^{-1}$)', fontsize=16)
+			ax2.set_xlabel(r'$\mu_\alpha$ (mas yr$^{-1}$)', fontsize=30)
+			ax2.set_ylabel(r'$\mu_\delta$ (mas yr$^{-1}$)', fontsize=30)
 			plt.setp(ax1.get_yticklabels()[0], visible=False)
 			plt.setp(ax1.get_xticklabels(), visible=False)
 			plt.setp(ax3.get_yticklabels(), visible=False)
 			plt.setp(ax3.get_xticklabels()[0], visible=False)
-			f.subplots_adjust(hspace=0., wspace=0.)
+			fig.subplots_adjust(hspace=0., wspace=0.)
+
 			if (savefig):
-				f.savefig(self.plotNameRoot + 'PMHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
+				fig.savefig(self.plotNameRoot + 'PMHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
 
 
 	def combineMemberships(self):
@@ -675,11 +708,8 @@ class GaiaClusterMembers(object):
 
 		#members
 		mask = self.data[self.data['membership'] > 0]
-		#self.get_minMembership(data[mask][y])
-
 		ax.plot(mask[x1] - mask[x2], mask[y],'.', color='deeppink')
-		ax.set_ylim(max(mask[y]), min(mask[y]))
-		#ax.set_xlim(-1, 5)
+		ax.set_ylim(max(mask[y]), min(mask[y])-.5)
 		ax.set_xlabel('G_BP'+'-'+'G_RP', fontsize=16)
 		ax.set_ylabel('G', fontsize=16)
 		if (savefig):
@@ -695,9 +725,7 @@ class GaiaClusterMembers(object):
 
 		# take only those that pass the membership threshold
 		members = self.data.loc[self.data['membership'] > 0].copy(deep=True)
-		#members['membership'] = 0.01
-		# members['membership'] = ((members['membership']-min(members['membership']))/(max(members['membership'])-min(members['membership']))) \
-		# * 0.8 + 0.1
+		print ('Length of members = ', len(members))
 
 		# include only the columns we need in the output table.
 		# Currently I am not including Gaia photometry
@@ -759,6 +787,8 @@ class GaiaClusterMembers(object):
 		# write the phot file
 		self.dumpPhotFile(out)
 
+	
+
 
 	def dumpPhotFile(self, out, filename=None):
 		if (filename is None):
@@ -768,8 +798,6 @@ class GaiaClusterMembers(object):
 		zfillN = int(12) 
 
 		# write to file with proper formatting
-		# fdec = np.abs(np.log10(self.photSigFloor)).astype(int)
-		# ffmt = '%-' + str(fdec + 3) + '.' + str(fdec) + 'f'
 		ffmt = '%-7.4f'
 		with open(filename, 'w', newline='\n') as f:
 			ascii.write(Table.from_pandas(out), delimiter=' ', output=f, format = 'basic', overwrite=True,
@@ -827,14 +855,16 @@ class GaiaClusterMembers(object):
 		yamlOutput['general']['cluster']['priors']['means']['Y'] = float(self.yamlInputDict['Y'][1])
 		yamlOutput['general']['cluster']['priors']['means']['carbonicity'] = float(self.yamlInputDict['carbonicity'][1])
 		yamlOutput['general']['cluster']['priors']['means']['logAge'] = float(self.yamlInputDict['logAge'][1])
-		yamlOutput['general']['cluster']['priors']['means']['distMod'] = float(self.yamlInputDict['distMod'][1])
+		#yamlOutput['general']['cluster']['priors']['means']['distMod'] = float(self.yamlInputDict['distMod'][1])
+		yamlOutput['general']['cluster']['priors']['means']['distMod'] = float(self.dmod)
+
 
 		yamlOutput['general']['cluster']['priors']['sigmas']['Fe_H'] = float(self.yamlInputDict['Fe_H'][2])
 		yamlOutput['general']['cluster']['priors']['sigmas']['Av'] = float(self.yamlInputDict['Av'][2])
 		yamlOutput['general']['cluster']['priors']['sigmas']['Y'] = float(self.yamlInputDict['Y'][2])
 		yamlOutput['general']['cluster']['priors']['sigmas']['carbonicity'] = float(self.yamlInputDict['carbonicity'][2])
 		yamlOutput['general']['cluster']['priors']['sigmas']['logAge'] = float(self.yamlInputDict['logAge'][2])
-		yamlOutput['general']['cluster']['priors']['sigmas']['distMod'] = float(self.yamlInputDict['distMod'][2])
+		yamlOutput['general']['cluster']['priors']['sigmas']['distMod'] = float(self.err_dmod)
 
 
 		# I hope this doesn't need to be sorted in the same order as the original
@@ -851,7 +881,6 @@ class GaiaClusterMembers(object):
 			tools = TOOLS, width = 500, height = 700,
 			x_range = xrng, y_range = yrng)
 
-		# set all useDBI = 0 to start
 		
 		self.data['useDBI'] = [1]*len(self.data)
 		mask = (self.data['membership'] > 0) 
@@ -924,9 +953,6 @@ class GaiaClusterMembers(object):
 			mask = (((self.data['PRV'] >= self.RV_memmin) & (self.data['PPa'] >= self.Pa_memmin)) & (self.data['PPM'] >= self.PM_memmin))
 			sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
 		resetButton.on_click(resetCallback)
-
-		# text box to define the output file
-		# outfile = TextInput(value = datafile + '.new', title = "Output File Name:")
 
 		# add a button to write the files
 		writeButton = Button(label = "Write .phot and .yaml files",  button_type = "success")
@@ -1010,8 +1036,6 @@ class GaiaClusterMembers(object):
 
 	def interpolateModel(self, age, FeH, isochroneFile, mag = 'phot_g_mean_mag', color1 = 'phot_bp_mean_mag', color2 = 'phot_rp_mean_mag'):
 		# perform a linear interpolation in the model grid between the closest points
-
-
 
 		# get the model grid
 		grid = self.getModelGrid(isochroneFile)
@@ -1306,37 +1330,44 @@ class GaiaClusterMembers(object):
 	def runAll(self, clusterName, filename=None):
 		OCdf = pd.read_csv('OCcompiled_clean_v2.csv')
 		row = OCdf.loc[OCdf['ID'] == clusterName].iloc[0]
-
+		self.row = row
+		
 		# get the cluster center
 		self.center = SkyCoord(row['RA[hr]'], row['Dec[deg]'], unit=(units.hourangle, units.degree))
 		self.RA = self.center.ra.to(units.degree).value
 		self.Dec = self.center.dec.to(units.degree).value
-		#self.center = center.ra.to(units.degree).value
+
 		#calculate the distance modulus and error
 		dmod = 5.*np.log10(row['dist[pc]']) - 5.
 		err_dmod = (5.*1./np.log(10.)*(1./row['dist[pc]']))*row['err_dist[pc]'] # error propagation
+		
 		# estimate the cluster tidal radius 
 		# equation from Binney and Tremaine for Jacoby Radius (8.91)
 		# want this in degrees
 		Mg = 1.5*10**12 #*units.solMass #this probably could use verification and a reference
 		self.rt = row['rgc[pc]']*(row['mass[Msun]']/(3.*Mg))**(1./3.)
 		self.pass_no = 1
-		if filename is not None:
-			rtfac = .5
+		if filename is not None: #read in exisiting data file
+			rtfac = 1
 			self.radius = rtfac*np.arctan2(self.rt, row['dist[pc]'])*180./np.pi
 			print ('Radius=', self.radius)
 			self.readDataFromFile(clusterName, filename)
-		else:
-			rtfac = 5
+		else: #if no exisiting data file, query data from a radius of self.radius
+			rtfac = 6
 			self.radius = rtfac*np.arctan2(self.rt, row['dist[pc]'])*180./np.pi
 			print ('Getting data from a radius of',self.radius,' deg')
 			self.getData(clusterName)
+			print ('Data queried and saved.')
+			return
 		self.getRVMembers(clusterName)
 		self.getParallaxMembers(clusterName)
+		self.dmod = 5.*np.log10(self.pa_fit[0].mean[0]) - 5.
+		self.err_dmod = (5.*1./np.log(10.)*(1./self.pa_fit[0].mean[0]))*self.pa_fit[0].stddev[0]
 		self.getPMMembers(clusterName) #Memberships combined in PM functions
 		self.get_coreRadius()
 		self.pass_no = 2
 		self.readDataFromFile(clusterName, clusterName+'_dir/'+clusterName+'_GaiaData.ecsv')
+		print ('Radius=',max(self.data['rCenter']))
 		self.getRVMembers(clusterName)
 		self.getParallaxMembers(clusterName)
 		self.getPMMembers(clusterName)
