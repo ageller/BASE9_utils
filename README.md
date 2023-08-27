@@ -7,3 +7,13 @@ Creating a conda env for this
 conda create --name BASE9 -c conda-forge python=3.10 astropy astroquery jupyter scipy numpy matplotlib pandas pyyaml shapely bokeh
 conda activate BASE9
 ```
+# Introduction
+This pipeline is for identifying photometric binaries in open clusters and works in conjunction with the Bayesian Analysis for Stellar Evolution with Nine Variables (BASE-9) code for open clusters in which Gaia, Pan-STARRS, and 2MASS photometry is available for.  More details on this pipeline may be found in Childs et al. (in prep).  Documentation for the BASE-9 code may be found at https://github.com/BayesianStellarEvolution/base-cpp.  All parts of the pipeline use dependencies from the virtual environment listed above.
+
+# How to Use
+
+  ## Generating BASE-9 Input Files
+
+The codes for generating the input files for the first stage of BASE-9, singlePop, are found in the getGaiaData folder.  The makePhot.ipynb notebook file, getGaiaData.py, and OCcompiled_clean_v2.csv files are needed.  The makePhot.ipynb notebook will interface with the getGaiaData.py code to query and format the observational data.  The output of these codes are the file.phot and file.yaml files needed for singlePop input.  These codes will also make use of Gaia kinematic measurements, where avaialable for stars, to determine the cluster membership prior (CMprior) of each star.
+
+In order to run the makePhot.ipynb notebook the user must have also downloaded the OCcompiled_clean_v2.csv file which contains the cluster prior values for the BASE-9 analysis.  More specifically, the file contains the center coordinates, cluster mass, age, distance, reddening, and metalliticity for a hundreds of Galactic open clusters.  These values are taken from previous literature and are necessary parameters for our pipeline.
