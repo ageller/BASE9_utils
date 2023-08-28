@@ -48,13 +48,31 @@ python dividePhot.py --res ngc188.res --phot NGC_188.phot --yaml base9.yaml --nt
 
 **NOTE: This will trim your res file to only include stage 3.  You should make a copy of it to keep the original version.**
 
-A typical number of threads to use for open clusters on Quest is 500.  After `sampleMass` is done running, the resulting files can be combined into one condensed file that summarizes the results with the `sampleMassParallelization/sampleMassAnalysis.ipynb` notebook.  To run the code in a Jupyter notebook call `write_data(clusterName)`.  This will read in each partion of the parallelized `sampleMass` output and summarize the results in a `file.df` file.  The `file.df` file will contain the columns:  
+A typical number of threads to use for open clusters on Quest is 500.  After `sampleMass` is done running, the resulting files can be combined into one condensed file that summarizes the results with the `sampleMassParallelization/sampleMassAnalysis.ipynb` notebook.  To run the code in a Jupyter notebook call `write_data(clusterName)`.  This will read in each partion of the parallelized `sampleMass` output and summarize the results in a `file.df` file.  The `file.df` file contain for every star sent through `sampleMass` (in separate rows) with the columns:  
 
-``` 
-source_id ra dec pmra pmdec radial_velocity G phot_g_mean_flux_over_error G_BP phot_bp_mean_flux_over_error G_RP phot_rp_mean_flux_over_error parallax teff_gspphot ruwe number_of_neighbours number_of_mates g_ps sigg_ps r_ps sigr_ps i_ps sigi_ps z_ps sigz_ps y_ps sigy_ps J_2M sigJ_2M H_2M sigH_2M Ks_2M sigKs_2M sigG sigG_BP sigG_RP coord.ra coord.dec rCenter id PPa sig_E(B-V) E(B-V) PRV PM_ra PM_dec PPM CMprior member binary m1Median qMedian m1Std m1_16 m1_84 qStd q_16 q_84 
-```
+- `source_id` : Gaia source ID of the star
+- `ra`, `dec` : the right ascension and declination of the star in degrees
+- `pmra`, `pmdec` : the proper motion measurements of the star in right ascension and dclination in mas/yr
+- `radial_velocity` : the RV measurement of the star in km/s
+- `G`, `phot_g_mean_flux_over_error`, `G_BP`, `phot_bp_mean_flux_over_error`, `G_RP`, `phot_rp_mean_flux_over_error` : the Gaia photometric measurements and errors taken in Gaia G, G_BP, and G_RP bandpasses
+- `parallax` : the parallax measurement of the star in mas 
+- `teff_gspphot` :  the effective temperature estimate from Gaia 
+- `ruwe` : the ruwe value from Gaia
+- `number_of_neighbours`, `number_of_mates` : ancillary data from Gaia catalog matching 
+- `g_ps`, `sigg_ps`, `r_ps`, `sigr_ps`, `i_ps`, `sigi_ps`, `z_ps`, `sigz_ps`, `y_ps`,  `sigy_ps` : the photometric measurments and errors for the Pan-STARRS g, r, i, z, and y bandpasses, respectively
+- `J_2M`, `sigJ_2M`, `H_2M`, `sigH_2M`, `Ks_2M`, `sigKs_2M` : the photometric measurements and errors for the 2MASS survery in the J, H, and Ks bandpasses, respectively
+- `rCenter` : the angular distance from the star from the cluster center in degrees
+- `sig_E(B-V)`,  `E(B-V)` : the error and reddening value taken from the Bayestarr reddening map. 
+- `PPa` : the probability the star is a cluster member as determined by its Gaia parallax measurment calaculated within our code
+- `PRV` : the probability the star is a cluster member as determined by its Gaia radial-velocity measurement calculated within our code
+-  `PM_ra`, `PM_dec`, `PPM` :  the probabilities the star is a cluster member as determined by its Gaia proper motion in the right ascension, proper motion in declination and combined probability for proper motion measuremnts calculated within our code
+- `CMprior` : the final cluster membership probability we feed to BASE-9 (calculated from our code)
+- `member`, `binary` : (True/False) our final identification of cluster members and binaries, resulting from our analysis of BASE-9 results  
+- `m1Median`, `m1Std`, `m1_16`, `m1_84` : the median, standard deviation, 16th and 84th percentiles of the BASE-9 posterior distribution for primary mass 
+- `qMedian`,`qStd`, `q_16`, `q_84` : the median, standard deviation, 16th and 84th percentiles of the BASE-9 posterior distribution for mass ratio.
 
-and each row will contain these data for every star sent through `sampleMass`.
+
+
 
 
 ## 3. Adding noise to `simCluster` data
