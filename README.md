@@ -25,7 +25,7 @@ conda activate BASE9
 
   In the last cell (cell [5]) there is an interactive isochrone tool.  This tool allows the user to adjust cluster priors and see how the prior values affect the isochrone and check its fit to the star in the file.phot file.  The filters shown on the CMD may be changed with the mag, color1, and color2 arguments.  The list of filters available are commented in cell [4].
 
-  ##  Parallelizing sampleMass and analyzing the results
+  ##  Parallelizing sampleMass
 
   After running singlePopMcmc, for the open cluster project, we want to run sampleMass.  This takes quite a long time, but can be split to run in parallel.  To do this, we need to split the phot file and run a separate instance of sampleMass on each subset of the phot file.  The dividePhot.py code in the sampleMassParllelization folder will:
 	1. trim the .res file to include only stage 3 (trim_res)
