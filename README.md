@@ -21,3 +21,9 @@ This pipeline is for identifying photometric binaries in open clusters and works
   To run the makePhot.ipynb clusterName must be set to the name of cluster of interest, as it appears in the OCcompiled_clean_v2.csv file, in cell [2].  In cell [3] the user may apply differential reddening corrections by setting cluster.deredden = 1.  If the user does not wish to apply differential reddening corretions cluster.deredden should be set equal to 0.
 
   The user may also change the cluster.sig_fac number.  This parameter sets the number of sigmas for which we want to calculate CMpriors of the stars that fall within this sigma range.  The default for this value is set to 10 but should be reduced for a more selective sample of likely cluster members.
+
+  cluster.runAll(clusterName) should be run if the user is querying the data for the first time.  If the user does not need to re-query the data and has a saved .csv of the data from a previous call of cluster.runAll(clusterName), the user should run cluster.runAll(clusterName,dataFile.csv) where dataFile.csv is the file with the previously queried data.  Running this code will produce the file.phot and file.yaml files as well as plots of the fits to the Gaia data in RV, parallax, propoer motion, and a CMD with cluster members shown in pink.
+
+  In the last cell (cell [5]) there is an interactive isochrone tool.  This tool allows the user to adjust cluster priors and see how the prior values affect the isochrone and check its fit to the star in the file.phot file.  The filters shown on the CMD may be changed with the mag, color1, and color2 arguments.  The list of filters available are commented in cell [4].
+
+  ## Adding Noise to simCluster data
