@@ -1,14 +1,13 @@
 # BASE9_utils
 Code utilities for running and analyzing results from BASE-9 
 
-Creating a conda env for this
+# Introduction
+This pipeline is for identifying photometric binaries in open clusters and works in conjunction with the Bayesian Analysis for Stellar Evolution with Nine Variables (BASE-9) code for open clusters in which Gaia, Pan-STARRS, and 2MASS photometry is available for.  More details on this pipeline may be found in Childs et al. (in prep).  Documentation for the BASE-9 code may be found at https://github.com/BayesianStellarEvolution/base-cpp.  All parts of the pipeline use dependencies from the virtual environment named BASE9.  To create this conda environment run
 
 ```
 conda create --name BASE9 -c conda-forge python=3.10 astropy astroquery jupyter scipy numpy matplotlib pandas pyyaml shapely bokeh
 conda activate BASE9
 ```
-# Introduction
-This pipeline is for identifying photometric binaries in open clusters and works in conjunction with the Bayesian Analysis for Stellar Evolution with Nine Variables (BASE-9) code for open clusters in which Gaia, Pan-STARRS, and 2MASS photometry is available for.  More details on this pipeline may be found in Childs et al. (in prep).  Documentation for the BASE-9 code may be found at https://github.com/BayesianStellarEvolution/base-cpp.  All parts of the pipeline use dependencies from the virtual environment listed above.
 
 # How to Use
 
@@ -26,4 +25,24 @@ This pipeline is for identifying photometric binaries in open clusters and works
 
   In the last cell (cell [5]) there is an interactive isochrone tool.  This tool allows the user to adjust cluster priors and see how the prior values affect the isochrone and check its fit to the star in the file.phot file.  The filters shown on the CMD may be changed with the mag, color1, and color2 arguments.  The list of filters available are commented in cell [4].
 
+  ##  Creating a single file from parallelized sampleMass results
+
+  After running singlePopMcmc, for the open cluster project, we want to run sampleMass.  This takes quite a long time, but can be split to run in parallel.  To do this, we need to split the phot file and run a separate instance of sampleMass on each subset of the phot file.  The dividePhot.py code in the sampleMassParllelization folder will:
+	1. trim the .res file to include only stage 3 (trim_res)
+	2. divide the phot file into chunks (divide_phot)
+	3. generate a job script for Quest to run sampleMass in parallel
+
+example command:
+` python dividePhot.py --res ngc188.res --phot NGC_188.phot --yaml base9.yaml --nthreads 4 `
+
+## NOTE: This will trim your res file to only include stage 3.  You should make a copy of it to keep the original version.
+
+A typical number of threads to use for open clusters on Quest is 500.  After sampleMass is done running the files may be combined into one condensed file that summarizes the results with the sampleMassAnalysis.ipynb notebook.  To run the code in a Jupyter notebook call write_data(clusterName).  This will read in each partion of the parallelized sampleMass output and summarize the results in a file.df file.  The file.df file will contain the columns:  
+
+` source_id ra dec pmra pmdec radial_velocity G phot_g_mean_flux_over_error G_BP phot_bp_mean_flux_over_error G_RP phot_rp_mean_flux_over_error parallax teff_gspphot ruwe number_of_neighbours number_of_mates g_ps sigg_ps r_ps sigr_ps i_ps sigi_ps z_ps sigz_ps y_ps sigy_ps J_2M sigJ_2M H_2M sigH_2M Ks_2M sigKs_2M sigG sigG_BP sigG_RP coord.ra coord.dec rCenter id PPa sig_E(B-V) E(B-V) PRV PM_ra PM_dec PPM CMprior member binary m1Median qMedian m1Std m1_16 m1_84 qStd q_16 q_84 `
+
+and each row will contain these data for every star sent through sampleMass.
+
+
   ## Adding Noise to simCluster data
+  To test for completeness, synthetic nosie modeled after the noise in the observational data may be added to the simulated data from simCluster.  To do so require the 
