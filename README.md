@@ -14,7 +14,7 @@ This pipeline is comprised of three major parts that must be run sequentially:
 	1. Generating the file.phot and file.yaml input files for BASE-9's singlePop
  	2. Parallelizing the results from singlePop for a parallelzied version of sampleMass to produce the file.df file.
   	3.  Adding noise modeled on the observational noise in file.df to the simulated photometry from simCluster and then running this noisy simulated photometry through parallelized sampleMass to test for completeness.
-  ## Generating BASE-9 input files
+  ## Generating BASE-9 input files for singlePop
 
   The codes for generating the input files for the first stage of BASE-9 (the singlePop stage) are found in the getGaiaData folder.  The makePhot.ipynb notebook file, getGaiaData.py, and OCcompiled_clean_v2.csv files are needed.  The makePhot.ipynb notebook will interface with the getGaiaData.py code to query and format the observational data.  The output of these codes are the file.phot and file.yaml files needed for singlePop input.  These codes will also make use of Gaia kinematic measurements, where avaialable for stars, to determine the cluster membership prior (CMprior) of each star.
   
