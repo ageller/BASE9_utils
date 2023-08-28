@@ -45,7 +45,7 @@ and each row will contain these data for every star sent through sampleMass.
 
 
   ## Adding noise to simCluster data
-  To test for completeness, synthetic noise modeled after the noise in the observational data may be added to the simulated data from simCluster.  To do so requires the file.df file from the sampleMassAnalysis.ipynb code, the simulated phot file (file.sim.out), and the add_sim_noise.py code.  To code requires two flags to be set.  The -n flag requires the name of the cluster and the -m flag requires the minimum Gaia G magnitude for which to apply noise to stars with G magnitudes in between 20 and -m.  For example, to run the code on NGC 188 for stars dimmer than G=12 the command is
+  To test for completeness, synthetic noise modeled after the noise in the observational data may be added to the simulated data from simCluster.  To do so requires the file.df file from the sampleMassAnalysis.ipynb code, the simulated phot file (file.sim.out), and the add_sim_noise.py code which can be found in the simCluster_utils folder.  To code requires two flags to be set.  The -n flag requires the name of the cluster and the -m flag requires the minimum Gaia G magnitude for which to apply noise to stars with G magnitudes in between 20 and -m.  For example, to run the code on NGC 188 for stars dimmer than G=12 the command is
   ` python3 add_sim_noise.py -n NGC_188 -m 12 `
 
   This will produce the output file simCluster.phot which has noise added to simulated data for stars in the G magnitude range -m to 20.  This simCluster.phot may then be run through the parallelized version of sampleMass in the say way as described above and the results can be used to test for completeness.
