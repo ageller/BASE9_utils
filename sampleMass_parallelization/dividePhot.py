@@ -17,23 +17,20 @@ import subprocess, sys, shlex
 
 
 def trim_res(resFile):
-
 	# save the original res file
 	shutil.copy(resFile, resFile + '.org')
-
 	# trim the file using awk
 	cmd = f"cat {resFile}.org | awk '{{if (NR == 1 || $6 == 3) print $0}}' > {resFile}"
-	process = subprocess.Popen(shlex.split(cmd), 
+	process = subprocess.Popen(cmd, 
 		stdout=subprocess.PIPE, 
 		stderr=subprocess.PIPE, 
 		shell=True)
-
 	stdout, stderr = process.communicate()
 
 def divide_phot(resFile, photFile, yamlFile, nThreads):
 
 	# read in the phot file (as strings so that I keep the formatting)
-	df = pd.read_csv(photFile, sep="\s+", converters={i: str for i in range(100)})
+	df = pd.read_csv(photFile, converters={i: str for i in range(100)})
 
 	# generate nthreads subsets of the res file
 	split_df = np.array_split(df, nThreads)
@@ -137,7 +134,6 @@ def define_args():
 	#to print out the options that were selected (probably some way to use this to quickly assign args)
 	opts = vars(args)
 	options = { k : opts[k] for k in opts if opts[k] is not None }
-	print(options)
 
 	return args
 
@@ -147,4 +143,5 @@ if __name__ == "__main__":
 	trim_res(args.res)
 	divide_phot(args.res, args.phot, args.yaml, args.nthreads)
 	create_srun(args.nthreads, args.srunName, args.yaml, args.phot, args.srunFile)
+	print ('Ready to submit srun_array.sh')
 
