@@ -2,7 +2,7 @@
 Code utilities for running and analyzing results from BASE-9 
 
 # Introduction
-This pipeline is for identifying photometric binaries in open clusters and works in conjunction with the Bayesian Analysis for Stellar Evolution with Nine Variables (BASE-9) code for open clusters in which Gaia, Pan-STARRS, and 2MASS photometry is available for.  More details on this pipeline may be found in Childs et al. (in prep).  Documentation for the BASE-9 code may be found at https://github.com/BayesianStellarEvolution/base-cpp.  All parts of the pipeline use dependencies from the virtual environment named BASE9.  To create this conda environment run
+This pipeline is for identifying photometric binaries in open clusters and works in conjunction with the Bayesian Analysis for Stellar Evolution with Nine Variables (BASE-9) code for open clusters in which Gaia, Pan-STARRS, and 2MASS photometry is available for.  More details on this pipeline may be found in Childs et al. (in prep).  Documentation for the BASE-9 code may be found at https://github.com/BayesianStellarEvolution/base-cpp.  All parts of the pipeline use dependencies from the virtual environment, BASE9.  To create this conda environment run
 
 ```
 conda create --name BASE9 -c conda-forge python=3.10 astropy astroquery jupyter scipy numpy matplotlib pandas pyyaml shapely bokeh
@@ -11,7 +11,7 @@ conda activate BASE9
 
 # How to Use
 
-  ## Generating BASE-9 Input Files
+  ## Generating BASE-9 input files
 
   The codes for generating the input files for the first stage of BASE-9 (the singlePop stage) are found in the getGaiaData folder.  The makePhot.ipynb notebook file, getGaiaData.py, and OCcompiled_clean_v2.csv files are needed.  The makePhot.ipynb notebook will interface with the getGaiaData.py code to query and format the observational data.  The output of these codes are the file.phot and file.yaml files needed for singlePop input.  These codes will also make use of Gaia kinematic measurements, where avaialable for stars, to determine the cluster membership prior (CMprior) of each star.
   
@@ -25,7 +25,7 @@ conda activate BASE9
 
   In the last cell (cell [5]) there is an interactive isochrone tool.  This tool allows the user to adjust cluster priors and see how the prior values affect the isochrone and check its fit to the star in the file.phot file.  The filters shown on the CMD may be changed with the mag, color1, and color2 arguments.  The list of filters available are commented in cell [4].
 
-  ##  Creating a single file from parallelized sampleMass results
+  ##  Parallelizing sampleMass and analyzing the results
 
   After running singlePopMcmc, for the open cluster project, we want to run sampleMass.  This takes quite a long time, but can be split to run in parallel.  To do this, we need to split the phot file and run a separate instance of sampleMass on each subset of the phot file.  The dividePhot.py code in the sampleMassParllelization folder will:
 	1. trim the .res file to include only stage 3 (trim_res)
@@ -44,5 +44,8 @@ A typical number of threads to use for open clusters on Quest is 500.  After sam
 and each row will contain these data for every star sent through sampleMass.
 
 
-  ## Adding Noise to simCluster data
-  To test for completeness, synthetic nosie modeled after the noise in the observational data may be added to the simulated data from simCluster.  To do so require the 
+  ## Adding noise to simCluster data
+  To test for completeness, synthetic noise modeled after the noise in the observational data may be added to the simulated data from simCluster.  To do so requires the file.df file from the sampleMassAnalysis.ipynb code, the simulated phot file (file.sim.out), and the add_sim_noise.py code.  To code requires two flags to be set.  The -n flag requires the name of the cluster and the -m flag requires the minimum Gaia G magnitude for which to apply noise to stars with G magnitudes in between 20 and -m.  For example, to run the code on NGC 188 for stars dimmer than G=12 the command is
+  ` python3 add_sim_noise.py -n NGC_188 -m 12 `
+
+  This will produce the output file simCluster.phot which has noise added to simulated data for stars in the G magnitude range -m to 20.  This simCluster.phot may then be run through the parallelized version of sampleMass in the say way as described above and the results can be used to test for completeness.
