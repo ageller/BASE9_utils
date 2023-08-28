@@ -28,7 +28,7 @@ This pipeline is comprised of three major parts that must be run sequentially:
 
   In the last cell (cell [5]) there is an interactive isochrone tool.  This tool allows the user to adjust cluster values to see how it will affect the isochrone and check its fit to the star in the file.phot file.  These adjustments in cluster values will be applied to the starting values in the file.yaml.  The interactive tool also allows user to remove stars from file.phot that may through off the BASE-9 fit (i.e blue stragglers, possible field stars, etc.).  The filters shown on the CMD may be changed with the mag, color1, and color2 arguments.  The list of filters available are commented in cell [4].  Once the user has found an isochrone, they may generate the file.phot and file.yaml files with the updated photometry and starting values in the file.yaml.
 
-  ##NOTE: If the parallelized version of singlePop is being used (see BASE-9 docs for more details) and each chain is in a different directory named Run$i, where $i is an int 1-10, the chains may be combined back together with the combine_res.py code found in the getGaiaData folder.  The clusterName must be set in this code before running it.
+If the parallelized version of singlePop is being used (see BASE-9 docs for more details) and each chain is in a different directory named Run$i, where $i is an int 1-10, the chains may be combined back together with the combine_res.py code found in the getGaiaData folder.  The clusterName must be set in this code before running it.
 
   ##  Parallelizing sampleMass
 
