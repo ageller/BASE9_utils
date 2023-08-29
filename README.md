@@ -34,6 +34,8 @@ In the last cell there is an interactive isochrone tool.  This tool allows the u
 
 If the parallelized version of `singlePopMcmc` is being used (see BASE-9 docs for more details) and each chain is in a different directory named `Run$i`, where `$i` is an int 1-10, the chains can be combined back together with the `combine_res.py` code found in the `getGaiaData` folder.  The clusterName must be set in this code before running it.
 
+We provide codes within the `plotting/` directory of this repo that can be used to generate summary plots and statistics for the posterior distributions resulting from `singlePopMcmc`.  Please see the [README](https://github.com/ageller/BASE9_utils/blob/main/plotting/README.md) in that directory for more information.
+
 ##  2. Parallelizing `sampleMass`
 
 After running `singlePopMcmc`, you can run `sampleMass` to derive star-by-star masses, mass-ratios and photometric membership probabilities.  This takes quite a long time but can be split to run in parallel.  To do this, we need to split the `file.phot` file and run a separate instance of `sampleMass` on each subset of the `file.phot` file.  The `dividePhot.py` code in the `sampleMass_parallelization` directory will:
