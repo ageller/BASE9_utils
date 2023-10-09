@@ -25,7 +25,7 @@ import os
 
 from bokeh import *
 from bokeh.plotting import figure
-from bokeh.models import ColumnDataSource, Button, PointDrawTool, Slider, TextInput, Div, Paragraph
+from bokeh.models import ColumnDataSource, Button, PointDrawTool, Slider, TextInput, Div, Paragraph, PanTool, BoxSelectTool
 from bokeh.layouts import column, row
 from shapely.geometry import LineString as shLs
 from shapely.geometry import Point as shPt
@@ -218,7 +218,9 @@ class GaiaClusterMembers(object):
 		for key, value in absCoeffs0.items():
 			self.absCoeffs[self.magRenamer[key]] = value
 
-
+		# multiple passes are typically used to narrow in on the cluster members
+		# these are defined in runAll
+		self.pass_no = 1
 
 	def getData(self, clusterName):
 		columns = ', '.join(self.columns)
@@ -1327,6 +1329,122 @@ class GaiaClusterMembers(object):
 
 		layout = column(title, instructions, row(p, buttons))
 		return(layout)
+
+	def createInteractiveSelector(self, 
+		mag = 'phot_g_mean_mag',  
+		color1 = 'phot_bp_mean_mag', 
+		color2 = 'phot_rp_mean_mag', 
+		rvbins = np.linspace(-100,100,200), 
+		pmrabins = np.linspace(-10,10,200), 
+		pmdecbins = np.linspace(-10,10,200), 
+		distbins = np.linspace(0, 4000, 200), 
+		cmdxrng = [0.5,2], 
+		cmdyrng = [20,10]
+	):
+		
+        """
+		Create an interactive plot with Bokeh that allows users to select regions in RV, PM, distance and see the selected 
+        stars on the CMD
+		"""
+		# calcuate the distance and convert to pandas
+		data = self.data.copy()
+		data['dist'] = (data['parallax'].values*units.mas).to(units.parsec, equivalencies = units.parallax()).value
+		
+		limits = ColumnDataSource(
+			data = dict(
+				rv = [min(rvbins), max(rvbins)],
+				pmra = [min(pmrabins), max(pmrabins)],
+				pmdec = [min(pmdecbins), max(pmdecbins)],
+				dist = [min(distbins), max(distbins)],  
+			)
+		)
+		
+		source = ColumnDataSource(
+			data = dict(
+				rv = data['radial_velocity'],
+				pmra = data['pmra'],
+				pmdec = data['pmdec'],
+				dist = data['dist'],
+				mag = data[mag],
+				color = data[color1] - data[color2],
+			)
+		)
+
+		def define_selected():
+			usedata = data.loc[
+							(((data['radial_velocity'] >= limits.data['rv'][0]) &
+								(data['radial_velocity'] <= limits.data['rv'][1])) |
+								(pd.isna(data['radial_velocity']))
+							) &
+							((data['pmra'] >= limits.data['pmra'][0]) & 
+								(data['pmra'] <= limits.data['pmra'][1])
+							) &
+							((data['pmdec'] >= limits.data['pmdec'][0]) & 
+								(data['pmdec'] <= limits.data['pmdec'][1])
+							) &
+							((data['dist'] >= limits.data['dist'][0]) & 
+								(data['dist'] <= limits.data['dist'][1])
+							)
+							]
+			s = ColumnDataSource(
+				data = dict(
+					rv = usedata['radial_velocity'],
+					pmra = usedata['pmra'],
+					pmdec = usedata['pmdec'],
+					dist = usedata['dist'],
+					mag = usedata[mag],
+					color = usedata[color1] - usedata[color2],
+				)
+			)
+			return(s)
+		
+		# cmd
+		pcmd = figure(title = 'CMD', tools = 'box_zoom,reset,pan', width = 500, height = 840, x_range = cmdxrng, y_range = cmdyrng)
+		pcmd.scatter(source = source, x = 'color', y = 'mag', alpha = 0.2, size = 3, marker = 'circle', color = 'gray')
+		selected_cmd = pcmd.scatter(source = define_selected(), x = 'color', y = 'mag', alpha = 1, size = 4, marker = 'circle', color = 'red')
+		pcmd.xaxis.axis_label = color1 + ' - ' + color2
+		pcmd.yaxis.axis_label = mag
+		
+		
+		def make_hist(skey, bins, xlabel, width = 400, height = 210, fill_color = 'gray', line_color = 'black'):
+			hist, edges = np.histogram(source.data[skey], bins = bins)
+			s = ColumnDataSource(data = dict(hist = hist, left = edges[:-1], right = edges[1:]))
+			def on_boxselect(attr, old, new):
+				if (len(new) > 0):
+					limits.data[skey] = [s.data['left'][new[0]], s.data['right'][new[-1]]]
+				else:
+					limits.data[skey] = [bins[0], bins[-1]]
+				ss = define_selected()
+				selected_cmd.data_source.data = dict(ss.data)
+				print(limits.data)
+			s.selected.on_change('indices', on_boxselect)
+
+			p = figure(width = width, height = height, tools = 'xwheel_zoom,reset', active_scroll = 'xwheel_zoom')
+			p.add_tools(PanTool(dimensions = "width"))
+			p.add_tools(BoxSelectTool(dimensions = 'width'))
+			p.quad(source = s, top = 'hist', bottom = 0, left = 'left', right = 'right', fill_color = fill_color, line_color = line_color)
+			p.xaxis.axis_label = xlabel
+			p.yaxis.axis_label = 'N'
+			
+			return(p)
+		
+
+
+		# histograms
+		prv = make_hist('rv', rvbins, 'Radial Velocity (km/s)', )
+		ppmra = make_hist('pmra', pmrabins, 'Proper Motion RA (mas/yr)', )
+		ppmdec = make_hist('pmdec', pmdecbins, 'Proper Motion Dec (mas/yr)')
+		pdist = make_hist('dist', distbins,  'Distance (pc)')
+
+		title = Div(text='<div style="font-size:20px; font-weight:bold">Interactively Select Cluster Members</div>')
+		instructions = Div(text='<div style="font-size:14px">Use the "Box Select" tool in any/all of the histograms to locate the likely cluster members.  After a selection is made in any histogram, the CMD updates to show the slected stars in red, and the current limits are printed below the plots. </div>')
+
+
+		# construct the interactive
+		layout = column(title, instructions, row(column(prv, ppmra, ppmdec, pdist), pcmd))
+
+		return (layout)
+
 
 	def runAll(self, clusterName, filename=None):
 		OCdf = pd.read_csv('OCcompiled_clean_v2.csv')
