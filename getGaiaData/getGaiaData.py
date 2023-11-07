@@ -270,9 +270,9 @@ class GaiaClusterMembers(object):
 		self.data['distance_error'] = (self.data['parallax_error']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
 		self.data = self.data.to_pandas()
 		self.red = True
-		self.getParallaxMembers(clusterName)
+		# self.getParallaxMembers(clusterName)
 		if (self.verbose > 0):
-			print ('Parallax mean =', self.pa_fit.parameters[1])
+			# print ('Distance mean [pc] =', self.pa_fit.parameters[1])
 			print ('Getting differential reddening E(B-V) values...')
 		bayestar = BayestarWebQuery(version='bayestar2019')
 		reddening = []
@@ -282,12 +282,16 @@ class GaiaClusterMembers(object):
 			start = (i-1)*size
 			stop = i*size
 			if i == 4:
-				ra = self.data['ra'][start:]
-				dec = self.data['dec'][start:]
+				ra = self.data['ra'][start:].to_numpy()
+				dec = self.data['dec'][start:].to_numpy()
+				d = self.data['distance'][start:].to_numpy()
+				d = np.nan_to_num(d, nan = np.nanmedian(d))
 			else:
-				ra = self.data['ra'][start:stop]
-				dec = self.data['dec'][start:stop]
-			d = [self.pa_fit.parameters[1]]*len(ra)
+				ra = self.data['ra'][start:stop].to_numpy()
+				dec = self.data['dec'][start:stop].to_numpy()
+				d = self.data['distance'][start:stop].to_numpy()
+				d = np.nan_to_num(d, nan = np.nanmedian(d))
+			# d = [self.pa_fit.parameters[1]]*len(ra)
 			coords = SkyCoord(ra=ra*units.deg, dec=dec*units.deg,
 							   distance=d*units.pc, frame='icrs')
 			reddening.append(bayestar(coords, mode='median'))
