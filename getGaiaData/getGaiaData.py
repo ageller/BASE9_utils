@@ -334,53 +334,57 @@ class GaiaClusterMembers(object):
 		if (self.verbose > 0):
 			print(f"Reading data from file {filename} ... ")
 		self.data = pd.read_csv(filename,sep=' ')
-		if self.deredden:
-			absCoeffs0 = {
-				"G":   0.83627 ,
-				"G_BP": 1.08337 ,
-				"G_RP": 0.63439 ,
-				"g_ps": 1.17994 ,
-				"r_ps": 0.86190 ,
-				"i_ps": 0.67648 ,
-				"z_ps": 0.51296 ,
-				"y_ps": 0.42905 ,
-				"J_2M":  0.28665 ,
-				"H_2M":  0.18082 ,
-				"Ks_2M": 0.11675 ,
-				}
-			med_red = np.mean(self.data['E(B-V)'])
-			self.data['g_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['g_ps'])
-			self.data['r_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['r_ps'])
-			self.data['i_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['i_ps'])
-			self.data['z_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['z_ps'])
-			self.data['y_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['y_ps'])
-			self.data['phot_g_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G'])
-			self.data['phot_bp_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G_BP'])
-			self.data['phot_rp_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G_RP'])
-			self.data['j_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['J_2M'])
-			self.data['h_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['H_2M'])
-			self.data['ks_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['Ks_2M'])
-
-			#add error from reddening in quadrature
-			var = np.std(self.data['E(B-V)'])**2
-			self.data['g_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['g_ps'])**2+self.data['g_mean_psf_mag_error']**2)
-			self.data['r_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['r_ps'])**2+self.data['r_mean_psf_mag_error']**2)
-			self.data['i_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['i_ps'])**2+self.data['i_mean_psf_mag_error']**2)
-			self.data['z_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['z_ps'])**2+self.data['z_mean_psf_mag_error']**2)
-			self.data['y_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['y_ps'])**2+self.data['y_mean_psf_mag_error']**2)
-			self.data['phot_g_mean_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G'])**2+self.data['phot_g_mean_mag_error']**2)
-			self.data['phot_bp_mean_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G_BP'])**2+self.data['phot_bp_mean_mag_error']**2)
-			self.data['phot_rp_mean_mag_eror']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G_RP'])**2+self.data['phot_rp_mean_mag_error']**2)
-			self.data['j_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['J_2M'])**2+self.data['j_msigcom']**2)
-			self.data['h_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['H_2M'])**2+self.data['h_msigcom']**2)
-			self.data['ks_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['Ks_2M'])**2+self.data['ks_msigcom']**2)
+	
+		if (self.deredden):
+			self.dereddenData()
 		else:
 			print ('No reddening  corrections applied')
+
 		if self.pass_no == 1:
 			self.data = self.data[self.data['rCenter'] <= self.radius]
 
 		self.data = self.data.drop_duplicates(keep='first')
 
+	def dereddenData(self):
+		absCoeffs0 = {
+			"G":   0.83627 ,
+			"G_BP": 1.08337 ,
+			"G_RP": 0.63439 ,
+			"g_ps": 1.17994 ,
+			"r_ps": 0.86190 ,
+			"i_ps": 0.67648 ,
+			"z_ps": 0.51296 ,
+			"y_ps": 0.42905 ,
+			"J_2M":  0.28665 ,
+			"H_2M":  0.18082 ,
+			"Ks_2M": 0.11675 ,
+			}
+		med_red = np.mean(self.data['E(B-V)'])
+		self.data['g_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['g_ps'])
+		self.data['r_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['r_ps'])
+		self.data['i_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['i_ps'])
+		self.data['z_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['z_ps'])
+		self.data['y_mean_psf_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['y_ps'])
+		self.data['phot_g_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G'])
+		self.data['phot_bp_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G_BP'])
+		self.data['phot_rp_mean_mag']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['G_RP'])
+		self.data['j_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['J_2M'])
+		self.data['h_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['H_2M'])
+		self.data['ks_m']-=(med_red-self.data['E(B-V)'])*3.1*(absCoeffs0['Ks_2M'])
+
+		#add error from reddening in quadrature
+		var = np.std(self.data['E(B-V)'])**2
+		self.data['g_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['g_ps'])**2+self.data['g_mean_psf_mag_error']**2)
+		self.data['r_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['r_ps'])**2+self.data['r_mean_psf_mag_error']**2)
+		self.data['i_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['i_ps'])**2+self.data['i_mean_psf_mag_error']**2)
+		self.data['z_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['z_ps'])**2+self.data['z_mean_psf_mag_error']**2)
+		self.data['y_mean_psf_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['y_ps'])**2+self.data['y_mean_psf_mag_error']**2)
+		self.data['phot_g_mean_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G'])**2+self.data['phot_g_mean_mag_error']**2)
+		self.data['phot_bp_mean_mag_error']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G_BP'])**2+self.data['phot_bp_mean_mag_error']**2)
+		self.data['phot_rp_mean_mag_eror']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['G_RP'])**2+self.data['phot_rp_mean_mag_error']**2)
+		self.data['j_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['J_2M'])**2+self.data['j_msigcom']**2)
+		self.data['h_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['H_2M'])**2+self.data['h_msigcom']**2)
+		self.data['ks_msigcom']=np.sqrt((self.data['sig_E(B-V)']**2+var/len(self.data))*(3.1*absCoeffs0['Ks_2M'])**2+self.data['ks_msigcom']**2)
 
 	def get_coreRadius(self):
 		mask = (self.data['membership']>0)
