@@ -202,17 +202,17 @@ class GaiaClusterMembers(object):
 		# Redenning coefficients
 		# from BASE-9 Filters.cpp
 		absCoeffs0 = {
-         "G":   0.83627 ,
-         "G_BP": 1.08337 ,
-         "G_RP": 0.63439 ,
-         "g_ps": 1.17994 ,
-         "r_ps": 0.86190 ,
-         "i_ps": 0.67648 ,
-         "z_ps": 0.51296 ,
-         "y_ps": 0.42905 ,
-         "J_2M":  0.28665 ,
-         "H_2M":  0.18082 ,
-         "Ks_2M": 0.11675 ,
+		 "G":   0.83627 ,
+		 "G_BP": 1.08337 ,
+		 "G_RP": 0.63439 ,
+		 "g_ps": 1.17994 ,
+		 "r_ps": 0.86190 ,
+		 "i_ps": 0.67648 ,
+		 "z_ps": 0.51296 ,
+		 "y_ps": 0.42905 ,
+		 "J_2M":  0.28665 ,
+		 "H_2M":  0.18082 ,
+		 "Ks_2M": 0.11675 ,
 		}
 		self.absCoeffs = {}
 		for key, value in absCoeffs0.items():
@@ -287,7 +287,7 @@ class GaiaClusterMembers(object):
 				dec = self.data['dec'][start:stop]
 			d = [self.pa_fit.parameters[1]]*len(ra)
 			coords = SkyCoord(ra=ra*units.deg, dec=dec*units.deg,
-			                   distance=d*units.pc, frame='icrs')
+							   distance=d*units.pc, frame='icrs')
 			reddening.append(bayestar(coords, mode='median'))
 			percentiles = bayestar(coords, mode='percentile', pct=[16,84])
 			samples.append([x[-1]-x[0] for x in percentiles])
@@ -444,8 +444,8 @@ class GaiaClusterMembers(object):
 		if (self.createPlots):
 
 			font = {'family' : 'Times New Roman',
-			    'weight' : 'normal',
-			    'size'   : 15}
+				'weight' : 'normal',
+				'size'   : 15}
 			plt.rc('font', **font)
 			plt.rc('text', usetex=True)
 			fig = plt.figure(figsize=(10,10))
@@ -1342,9 +1342,9 @@ class GaiaClusterMembers(object):
 		cmdyrng = [20,10]
 	):
 		
-        """
+		"""
 		Create an interactive plot with Bokeh that allows users to select regions in RV, PM, distance and see the selected 
-        stars on the CMD
+		stars on the CMD
 		"""
 		# calcuate the distance and convert to pandas
 		data = self.data.copy()
