@@ -225,6 +225,10 @@ class GaiaClusterMembers(object):
 		# default is to include stars within 10 sigma bounds around the cluster fit mean
 		self.sig_fac = 10
 	
+		# option to use the actual star distances for the reddening
+		# if set to False (default), then we use the distance to the cluste for each star
+		self.use_star_distance_for_reddening = False
+
 	def getData(self, clusterName):
 		columns = ', '.join(self.columns)
 
@@ -270,7 +274,10 @@ class GaiaClusterMembers(object):
 		self.data['distance_error'] = (self.data['parallax_error']).to(units.parsec, equivalencies=units.parallax()).to(units.parsec).value
 		self.data = self.data.to_pandas()
 		self.red = True
-		# self.getParallaxMembers(clusterName)
+		if (not self.use_star_distance_for_reddening):
+			self.getParallaxMembers(clusterName)
+			if (self.verbose > 0):
+				print ('Distance mean [pc] =', self.pa_fit.parameters[1])
 		if (self.verbose > 0):
 			# print ('Distance mean [pc] =', self.pa_fit.parameters[1])
 			print ('Getting differential reddening E(B-V) values...')
@@ -284,14 +291,17 @@ class GaiaClusterMembers(object):
 			if i == 4:
 				ra = self.data['ra'][start:].to_numpy()
 				dec = self.data['dec'][start:].to_numpy()
-				d = self.data['distance'][start:].to_numpy()
-				d = np.nan_to_num(d, nan = np.nanmedian(d))
+				if (self.use_star_distance_for_reddening):
+					d = self.data['distance'][start:].to_numpy()
+					d = np.nan_to_num(d, nan = np.nanmedian(d))
 			else:
 				ra = self.data['ra'][start:stop].to_numpy()
 				dec = self.data['dec'][start:stop].to_numpy()
-				d = self.data['distance'][start:stop].to_numpy()
-				d = np.nan_to_num(d, nan = np.nanmedian(d))
-			# d = [self.pa_fit.parameters[1]]*len(ra)
+				if (self.use_star_distance_for_reddening):
+					d = self.data['distance'][start:stop].to_numpy()
+					d = np.nan_to_num(d, nan = np.nanmedian(d))
+			if (not self.use_star_distance_for_reddening):
+				d = [self.pa_fit.parameters[1]]*len(ra)
 			coords = SkyCoord(ra=ra*units.deg, dec=dec*units.deg,
 							   distance=d*units.pc, frame='icrs')
 			reddening.append(bayestar(coords, mode='median'))
