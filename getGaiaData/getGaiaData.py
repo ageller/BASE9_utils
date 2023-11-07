@@ -248,8 +248,6 @@ class GaiaClusterMembers(object):
 		f"AND gaia.pmdec IS NOT NULL AND abs(gaia.pmdec)>0;"
 
 
-		print (self.ADQLcmd)
-
 		if (self.verbose > 1):
 			print(self.ADQLcmd)
 		job = Gaia.launch_job_async(self.ADQLcmd, dump_to_file=False) #could save this to a file
