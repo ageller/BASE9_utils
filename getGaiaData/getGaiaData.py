@@ -271,8 +271,9 @@ class GaiaClusterMembers(object):
 		self.data = self.data.to_pandas()
 		self.red = True
 		self.getParallaxMembers(clusterName)
-		print ('Parallax mean =', self.pa_fit.parameters[1])
-		print ('Getting differential reddening E(B-V) values...')
+		if (self.verbose > 0):
+			print ('Parallax mean =', self.pa_fit.parameters[1])
+			print ('Getting differential reddening E(B-V) values...')
 		bayestar = BayestarWebQuery(version='bayestar2019')
 		reddening = []
 		samples = []
