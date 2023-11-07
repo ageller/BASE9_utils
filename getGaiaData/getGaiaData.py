@@ -222,6 +222,9 @@ class GaiaClusterMembers(object):
 		# these are defined in runAll
 		self.pass_no = 1
 
+		# default is to include stars within 10 sigma bounds around the cluster fit mean
+		self.sig_fac = 10
+	
 	def getData(self, clusterName):
 		columns = ', '.join(self.columns)
 
