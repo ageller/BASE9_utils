@@ -8,6 +8,8 @@
 
 - `check_cmd.py`: make a quick CMD of a .phot file (including error bars), outputs cmd.png.  Usage: `./check_cmd.py <phot file> <y-axis filter> <x-axis color>` e.g., `./check_cmd.py hyades.phot V B-V` .  Aaron added an additional optional input argument with the isochrone file name; if specified the isochrone is overplotted in red.
 
+- `plot_mass.py` : make a histogram of the sampleMass output.  This requires both the `.res` and `.massSample` files to be in the same directory, and it assumes they have the same rootname. Usage: `./plot_mass.py mystar.res`
+
 As can be seen on the first line of each script, it has the python path set as `#!python`. This may need to be changed, depending on where the python executables are stored. It also assumes you have numpy as matplotlib installed, which most python users do.
 
 Note: you can also run these scripts as regular .py files (not executables), with, e.g.,  `python mcmc_results.py mystar.res`.  In that case, the first line of the script (with the path to python) is not relevant.  
