@@ -154,15 +154,18 @@ class GaiaClusterMembers(object):
 		self.r_tide = 0
 		self.r_core = 0
 		self.fitter = fitting.LevMarLSQFitter()
-		self.mem_min = 0.0023
+		self.mem_min = 1e-10
 
 
-		self.photSigFloor = 0.02 # floor to the photometry errors for the .phot file
+		self.photSigFloor = 0.01 # floor to the photometry errors for the .phot file
 		#self.sig_fac = 3
 		# output
 		self.SQLcmd = ''
 		self.data = None # will be an astropy table
 		self.small_data = None
+		self.group_no = None
+		self.lim_radius = None
+		self.min_cluster_size = None
 		self.createPlots = True # set to True to generate plots
 		self.plotNameRoot = ''
 		self.photOutputFileName = 'input.phot'
@@ -385,33 +388,53 @@ class GaiaClusterMembers(object):
 		#	self.data = self.data[self.data['rCenter'] <= self.radius]
 		#self.data = self.data.drop_duplicates(keep='first')
 
-	def get_small_data(self):
-		check = 'n'
-		while check == 'n':
-			lim_radius = float(input('Radius for HDBSCAN? (in degrees)'))
-			small_data = self.data[self.data['rCenter']<lim_radius]
+	def get_small_data(self, clusterName):
+		if self.group_no == None:
+			check = 'n'
+			while check == 'n':
+				lim_radius = float(input('Radius for HDBSCAN? (in degrees)'))
+				small_data = self.data[self.data['rCenter']<lim_radius]
+				blob = small_data[['ra','dec','pmra','pmdec','parallax']]
+				min_cluster_size = int(input('Min cluster size?'))
+				clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size)
+				clusterer.fit(blob)
+				small_data['label'] = clusterer.labels_
+				small_data['group_probabilities'] = clusterer.probabilities_
+				no_groups = np.max(clusterer.labels_)
+				for i in range(-1,no_groups+1):
+					group_no = i
+					print (len(small_data[small_data['label']==group_no]), ' members in group ',i)
+				group_no = int(input('Which group?'))
+				group = small_data[small_data['label']==group_no]
+				print ("Cluster distance = ", np.median(group['distance'].values)," pc")
+				cs=plt.scatter(group['phot_bp_mean_mag']-group['phot_rp_mean_mag'],group['phot_g_mean_mag'],c=group['group_probabilities'])
+				low_ylim = min(group['phot_g_mean_mag'])-1
+				high_ylim = max(group['phot_g_mean_mag'])+1
+				plt.ylim(high_ylim, low_ylim)
+				plt.colorbar(cs,pad=0,label='Probability')
+				plt.show()
+				check = input('Use this group? (y/n)?')
+			self.group_no = group_no
+			self.lim_radius = lim_radius
+			self.min_cluster_size = min_cluster_size
+		else:
+			small_data = self.data[self.data['rCenter']<self.lim_radius]
 			blob = small_data[['ra','dec','pmra','pmdec','parallax']]
-			min_cluster_size = int(input('Min cluster size?'))
-			clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size)
+			clusterer = hdbscan.HDBSCAN(min_cluster_size=self.min_cluster_size)
 			clusterer.fit(blob)
 			small_data['label'] = clusterer.labels_
 			small_data['group_probabilities'] = clusterer.probabilities_
-			no_groups = np.max(clusterer.labels_)
-			for i in range(-1,no_groups+1):
-				group_no = i
-				print (len(small_data[small_data['label']==group_no]), ' members in group ',i)
-			group_no = int(input('Which group?'))
-			group = small_data[small_data['label']==group_no]
+			group = small_data[small_data['label']==self.group_no]
 			print ("Cluster distance = ", np.median(group['distance'].values)," pc")
 			cs=plt.scatter(group['phot_bp_mean_mag']-group['phot_rp_mean_mag'],group['phot_g_mean_mag'],c=group['group_probabilities'])
 			low_ylim = min(group['phot_g_mean_mag'])-1
 			high_ylim = max(group['phot_g_mean_mag'])+1
 			plt.ylim(high_ylim, low_ylim)
 			plt.colorbar(cs,pad=0,label='Probability')
+			plt.title(clusterName)
+			plt.savefig(self.plotNameRoot + clusterName+'_HDBSCAN_cmd.png', bbox_inches='tight')
 			plt.show()
-			check = input('Use this group? (y/n)?')
-		self.small_data = small_data[small_data['label']==group_no]
-		plt.savefig(self.plotNameRoot + 'HDBSCAN_cmd.png', bbox_inches='tight')
+		self.small_data = small_data[small_data['label']==self.group_no]
 
 	def get_p_value(self, param):
 		self.small_data[param].fill_value = np.nan
@@ -440,13 +463,14 @@ class GaiaClusterMembers(object):
 		#guess = brv[np.argmax(hrv)]
 		guess = np.mean(x)
 		std = np.std(x)
-		#p_init = models.Gaussian1D(np.max(hrv), guess, np.diff(brv)[0])
 		p_init = models.Gaussian1D(np.max(hrv), guess, std)
 
 
 		fit_p = self.fitter
 		fit = fit_p(p_init, brv[:-1], hrv)
-	
+		print (fit.stddev, std)
+		if fit.stddev > std*5:
+			fit = p_init
 		mean = fit.parameters[1]
 		sig = fit.parameters[2]
 		xf = np.linspace(np.min(x), np.max(x), len(x))
@@ -467,6 +491,17 @@ class GaiaClusterMembers(object):
 
 		self.data[df_name] = (self.data[param] - mean)**2/(sig**2)
 		fig.savefig(self.plotNameRoot + param +'_hist.png', bbox_inches='tight')
+		plt.show()
+
+	def combineMemberships(self):
+		if (self.verbose > 0):
+			print("combining memberships ...")
+		self.data['PPM'] = self.data['PPMra'].fillna(0)+self.data['PPMdec'].fillna(0)
+		df = self.data
+		chi2 = df['PRV'].fillna(0)+df['PPa'].fillna(0)+self.data['PPMra'].fillna(0)+self.data['PPMdec'].fillna(0)
+		#p=1-stats.chi2.cdf(chi2, 3)
+		p = stats.chi2.sf(chi2,4)
+		self.data['membership'] = p
 
 	def get_coreRadius(self):
 		mask = (self.data['membership']>self.mem_min)
@@ -521,6 +556,7 @@ class GaiaClusterMembers(object):
 		ax.set_yscale('log')
 		ax.set_xlabel('r [arcmin]')
 		ax.set_ylabel(r'N / arcmin$^2$')
+		plt.show()
 
 
 
@@ -579,18 +615,7 @@ class GaiaClusterMembers(object):
 	# 			f.savefig(self.plotNameRoot + 'PMHist'+str(self.pass_no)+'.pdf', format='PDF', bbox_inches='tight')
 
 
-	def combineMemberships(self):
-		if (self.verbose > 0):
-			print("combining memberships ...")
-		self.data['PPM'] = self.data['PPMra']*self.data['PPMdec']
-		df = self.data
-		chi2 = df['PRV'].fillna(0)+df['PPa'].fillna(0)+df['PPM'].fillna(0)
-		p=1-stats.chi2.cdf(chi2, 3)
-		self.data['membership'] = p
-		# self.data['membership'] = self.data['PRV'].fillna(1)*self.data['PPa'].fillna(1)*self.data['PPM'].fillna(1)
-		# self.data['membership'] = np.where((self.data['membership']==0),0, p)
-		# self.data['membership'] = np.where((self.data['membership']>0) & (self.data['membership']< 0.01) ,0.01, self.data['membership'])
-		# self.data['membership'] = np.where((self.data['membership']>0.99) ,0.99, self.data['membership'])
+
 
 
 
@@ -615,12 +640,11 @@ class GaiaClusterMembers(object):
 		ax.set_ylabel('G', fontsize=16)
 		if (savefig):
 			f.savefig(self.plotNameRoot + 'CMD.pdf', format='PDF', bbox_inches='tight')
-
+		plt.show()
 
 	def generatePhotFile(self):
 		if (self.verbose > 0):
 			print("generating phot file ...")
-
 		# create a *.phot file for input to BASE-9
 		# would be nice if this was more general and could handle any set of photometry
 
@@ -675,9 +699,12 @@ class GaiaClusterMembers(object):
 		out = out.rename(columns={'ks_msigcom':'sigKs_2M'})
 		out = out.rename(columns={'membership':'CMprior'})
 
+		out['CMprior'] = np.where(out['CMprior'] < self.photSigFloor, self.photSigFloor, out['CMprior']) #set a phot CMprior floor of 0.01, per previous experiments
+		out['CMprior'] = np.where(out['CMprior'] > 0.9, 0.9, out['CMprior']) #set a phot CMprior ceiling of 0.9 to allow wiggle room for error in the models
+
 		# impose a floor to phot error to be safe
 		for c in ['sigG', 'sigG_BP', 'sigG_RP', 'sigg_ps', 'sigr_ps', 'sigi_ps', 'sigz_ps', 'sigy_ps', 'sigJ_2M', 'sigH_2M', 'sigKs_2M']:
-			out[c] = np.where((out[c] < self.photSigFloor), self.photSigFloor, out[c])
+			out[c] = np.where((out[c] < 0.02), 0.02, out[c]) #phot error floor of 0.02 is just what works from previous trys
 
 		# replace any nan or mask values with -9.9 for sig, which BASE9 will ignore
 		for c in ['G', 'G_BP', 'G_RP', 'g_ps', 'r_ps', 'i_ps', 'z_ps', 'y_ps', 'J_2M', 'H_2M', 'Ks_2M']:
@@ -789,10 +816,8 @@ class GaiaClusterMembers(object):
 			tools = TOOLS, width = 500, height = 700,
 			x_range = xrng, y_range = yrng)
 
-		# set all useDBI = 0 to start
 		
-		self.data['useDBI'] = [1]*len(self.data)
-		mask = (self.data['membership'] > 0) 
+		mask = (self.data['membership'] >= self.mem_min) 
 		membershipOrg = self.data['membership'].data.copy() # in case I need to reset
 		# add an index column so that I can map back to the original data
 		self.data['index'] = np.arange(0,len(self.data))
@@ -804,7 +829,7 @@ class GaiaClusterMembers(object):
 		# add the phot points to the plot
 		# Note: I could handle categorical color mapping with factor_cmap, but this does not seem to update in the callback when I change the status in sourcePhot (I removed status since this doesn't work)
 		# colorMapper = factor_cmap('status', palette = ['black', 'dodgerblue'], factors = ['unselected', 'selected'])
-		photRenderer = p.scatter(source = sourcePhot, x = 'x', y = 'y', alpha = 0.5, size = 3, marker = 'circle', color = 'black')
+		photRenderer = p.scatter(source = sourcePhot, x = 'x', y = 'y', alpha = 0.5, size = 3, marker = 'circle', color = 'red')
 		p.scatter(source = sourcePhotSingles, x = 'x', y = 'y', alpha = 0.75, size = 8, marker = 'circle', color = 'dodgerblue')
 
 		# add the PointDrawTool to allow users to draw points interactively
@@ -859,22 +884,19 @@ class GaiaClusterMembers(object):
 			slider.value = 0.01  
 			self.data['useDBI'] = [0]*len(self.data)
 			self.data['membership'] = membershipOrg
-			mask = (((self.data['PRV'] >= self.RV_memmin) & (self.data['PPa'] >= self.Pa_memmin)) & (self.data['PPM'] >= self.PM_memmin))
+			mask = (self.data['membership']>=self.mem_min)
 			sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
 		resetButton.on_click(resetCallback)
 
-		# text box to define the output file
-		# outfile = TextInput(value = datafile + '.new', title = "Output File Name:")
-
 		# add a button to write the files
-		writeButton = Button(label = "Write .phot and .yaml files",  button_type = "success")
+		writeButton = Button(label = "Write BSS file",  button_type = "success")
 
 		def writeCallback(event):
 			# output an updated phot file
 			# This will be improved when the code is combined with BASE9_utils
-			self.generatePhotFile()
-			self.generateYamlFile()
-			print('Files saved : ', self.photOutputFileName, self.yamlOutputFileName) 
+			#self.generatePhotFile(self.sig1photOutputFileName)
+			#self.generateYamlFile()
+			print('need to write to file ') 
 
 		writeButton.on_click(writeCallback)
 
@@ -887,7 +909,8 @@ class GaiaClusterMembers(object):
 			if (len(sourcePhot.selected.indices) > 0):
 				indices = sourcePhot.data['index'][sourcePhot.selected.indices]
 				self.data['membership'][indices] = -1
-				mask = (((self.data['PRV'] >= self.RV_memmin) & (self.data['PPa'] >= self.Pa_memmin)) & (self.data['PPM'] >= self.PM_memmin))
+				mask = (self.data['membership']>=self.mem_min)
+				#mask = (((self.data['PRV'] >= self.RV_memmin) & (self.data['PPa'] >= self.Pa_memmin)) & (self.data['PPM'] >= self.PM_memmin))
 				sourcePhot.data = dict(x = self.data[mask][color1] - self.data[mask][color2], y = self.data[mask][mag], index = self.data[mask]['index'])
 				# reset
 				sourcePhot.selected.indices = []
@@ -949,11 +972,8 @@ class GaiaClusterMembers(object):
 	def interpolateModel(self, age, FeH, isochroneFile, mag = 'phot_g_mean_mag', color1 = 'phot_bp_mean_mag', color2 = 'phot_rp_mean_mag'):
 		# perform a linear interpolation in the model grid between the closest points
 
-
-
 		# get the model grid
 		grid = self.getModelGrid(isochroneFile)
-
 		# check that the age and Fe/H values are within the grid 
 		ageGrid = np.sort(np.unique(grid[:,0]))
 		FeHGrid = np.sort(np.unique(grid[:,1]))
@@ -961,7 +981,6 @@ class GaiaClusterMembers(object):
 		minAge = np.min(ageGrid)
 		maxFeH = np.max(FeHGrid)
 		minFeH = np.min(FeHGrid)
-
 		try:
 			# find the 4 nearest age and Fe/H values
 			iAge0 = np.where(ageGrid < age)[0][-1]
@@ -975,7 +994,6 @@ class GaiaClusterMembers(object):
 			FeH1 = FeH0
 			if (iFeH0 + 1< len(FeHGrid)):
 				FeH1 = FeHGrid[iFeH0 + 1]
-
 			# read in those parts of the isochrone file
 			inAge = False
 			inFeH = False
@@ -1023,7 +1041,7 @@ class GaiaClusterMembers(object):
 
 			# create an array to interpolate on
 			# https://stackoverflow.com/questions/30056577/correct-usage-of-scipy-interpolate-regulargridinterpolator
-			pts = (ages, FeHs, EEPs)
+			pts = (ages, FeHs, np.sort(EEPs))
 			for arr in np.unique([mag, color1, color2]):
 				val_size = list(map(lambda q: q.shape[0], pts))
 				vals = np.zeros(val_size)
@@ -1044,7 +1062,7 @@ class GaiaClusterMembers(object):
 			return None
 
 
-	def createInteractiveIsochrone(self, isochroneFile, initialGuess = [4, 0, 0, 0], mag = 'phot_g_mean_mag', color1 = 'phot_bp_mean_mag', color2 = 'phot_rp_mean_mag', xrng = [0.5,2], yrng = [20,10], yamlSigmaFactor = 2.0):
+	def createInteractiveIsochrone(self, isochroneFile, initialGuess = [4, 0, 0, 0], mag = 'phot_g_mean_mag', color1 = 'phot_bp_mean_mag', color2 = 'phot_rp_mean_mag', xrng = [0.5,6], yrng = [20,10], yamlSigmaFactor = 2.0):
 		'''
 		To run this in a Jupyter notebook (intended purpose):
 		--------------------
@@ -1065,12 +1083,13 @@ class GaiaClusterMembers(object):
 
 
 
+
 		self.df = self.data
 		self.table = Table.from_pandas(self.df)
-		mask = (self.df['membership'] > 0)
+		self.table['index'] = np.arange(0, len(self.data))
+		mask = (self.df['membership'] >= self.mem_min)
 		membershipOrg = self.df['membership'] # in case I need to reset
 		# add an index column so that I can map back to the original data
-		self.table['index'] = np.arange(0, len(self.data))
 		self.df['index'] = np.arange(0, len(self.df))
 		# get the isochrone at the desired age and metallicity
 		iso = self.interpolateModel(initialGuess[0], initialGuess[1], isochroneFile, mag = mag, color1 = color1, color2 = color2)
@@ -1094,7 +1113,7 @@ class GaiaClusterMembers(object):
 
 		# define the input for Bokeh
 		sourcePhot = ColumnDataSource(data = dict(x = self.df[mask][color1] - self.df[mask][color2], y = self.df[mask][mag], index = self.df[mask]['index']))
-		mask = (self.table['membership'] > 0)
+		mask = (self.table['membership'] >= self.mem_min)
 		oldsourcePhot = ColumnDataSource(data = dict(x = self.table[mask][color1] - self.table[mask][color2], y = self.table[mask][mag], index = self.table[mask]['index']))
 		sourceCluster = ColumnDataSource(data = dict(logAge = [initialGuess[0]], Fe_H = [initialGuess[1]], distMod = [initialGuess[2]], Av = [initialGuess[3]]))
 		sourceIso = ColumnDataSource(getObsIsochrone(iso, sourceCluster.data['distMod'][0], sourceCluster.data['Av'][0]))
@@ -1151,17 +1170,18 @@ class GaiaClusterMembers(object):
 
 		def deleteCallback(event):
 			# set the membership to -1, redefine the mask, and remove them from the columnDataSource
-			if (len(sourcePhot.selected.indices) > 0):
-				indices = oldsourcePhot.data['index'][sourcePhot.selected.indices]
-				self.table['membership'][indices] = -1
-				del_ids = self.table['id'][self.table['index'][indices]]
-				self.df['membership'][self.df['id'].isin(del_ids)] = -1
-				mask = (self.df['membership'] > 0 )
-				sourcePhot.data = dict(x = self.df[mask][color1] - self.df[mask][color2], y = self.df[mask][mag], index = self.df[mask]['index'])
-				# reset
-				mask = (self.table['membership'] > 0 )
-				oldsourcePhot.data = dict(x = self.table[mask][color1] - self.table[mask][color2], y = self.table[mask][mag], index = self.table[mask]['index'])
-				sourcePhot.selected.indices = []
+			indices = oldsourcePhot.data['index'][sourcePhot.selected.indices]
+			self.table['membership'][indices] = -1
+			del_ids = self.table['id'][self.table['index'][indices]]
+			self.df['membership'][self.df['id'].isin(del_ids)] = -1
+			mask = (self.df['membership'] >= self.mem_min )
+			sourcePhot.data = dict(x = self.df[mask][color1] - self.df[mask][color2], y = self.df[mask][mag], index = self.df[mask]['index'])
+			# reset
+			mask1 = (self.table['membership'] > self.mem_min)
+			oldsourcePhot.data = dict(x = self.table[mask1][color1] - self.table[mask1][color2], y = self.table[mask1][mag], index = self.table[mask1]['index'])
+			sourcePhot.selected.indices = []
+			indices = sourcePhot.data['index'][sourcePhot.selected.indices]
+		
 
 		deleteButton.on_click(deleteCallback)
 
@@ -1170,7 +1190,7 @@ class GaiaClusterMembers(object):
 
 		def resetCallback(event):
 			self.df['membership'] = membershipOrg
-			mask = (self.df['membership'] > 0)
+			mask = (self.df['membership'] >= self.mem_min)
 			sourcePhot.data = dict(x = self.df[mask][color1] - self.df[mask][color2], y = self.df[mask][mag], index = self.df[mask]['index'])
 
 		resetButton.on_click(resetCallback)
@@ -1203,8 +1223,8 @@ class GaiaClusterMembers(object):
 
 				print(f'{k}: initial = {init}, final = {self.yamlInputDict[k]}')
 				if np.abs(val-mean) > sig:
-					print ('WARNING:',k,' sig value too small.  Increasing by 1.')
-					self.yamlInputDict[k][2] += 1
+					print ('WARNING:',k,' sig value too small.  Increasing by 0.25')
+					self.yamlInputDict[k][2] += 0.25
 			self.generateYamlFile()
 			print('Files saved : ', self.photOutputFileName, self.yamlOutputFileName) 
 
@@ -1286,7 +1306,7 @@ class GaiaClusterMembers(object):
 
 	def runAll(self, clusterName, filename=None):
 		self.readDataFromFile(clusterName, filename)
-		self.get_small_data()
+		self.get_small_data(clusterName)
 		params = ["radial_velocity", "distance", "pmra", "pmdec"]
 		[self.get_p_value(param) for param in params]
 		self.combineMemberships()
@@ -1295,4 +1315,5 @@ class GaiaClusterMembers(object):
 		self.generateYamlFile()
 		self.get_coreRadius()
 		self.saveDataToFile('OC_data/'+clusterName+'_dir/'+clusterName+'.csv',mems_only=True)
+		plt.close('all')
 		print("done.")
