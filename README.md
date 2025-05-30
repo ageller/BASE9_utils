@@ -30,6 +30,9 @@ This pipeline is comprised of three major parts that must be run sequentially:
 
 If the parallelized version of singlePop is being used (see BASE-9 docs for more details) and each chain is in a different directory named Run$i, where $i is an int 1-10, the chains may be combined back together with the combine_res.py code found in the getGaiaData folder.  The clusterName must be set in this code before running it.
 
+## BEST PRACTICES FOR SINGLEPOP
+To avoid logPost = -inf,make sure the phot file is properly formated. It is very particular. 
+CMprior should be between 0.01 and 0.9 for singlePop.  A continuous logPost = -inf means there is a problem with either the phot file or the yaml file (make sure ther are no nans for the prior, sigma, or starting values).  It is possible for a sampling to start in logPost = -inf and move out of it.
   ##  Parallelizing sampleMass
 
   After running singlePopMcmc, for the open cluster project, we want to run sampleMass.  This takes quite a long time, but can be split to run in parallel.  To do this, we need to split the phot file and run a separate instance of sampleMass on each subset of the phot file.  The dividePhot.py code in the sampleMassParllelization folder will:
