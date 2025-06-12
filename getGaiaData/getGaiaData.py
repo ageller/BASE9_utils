@@ -288,10 +288,10 @@ class GaiaClusterMembers(object):
         if self.group_no is None:
             check = "n"
             while check == "n":
-                lim_radius = float(input("Search radius for HDBSCAN? (in degrees)"))
+                lim_radius = float(input("Search radius for HDBSCAN? (float in degrees)"))
                 small_data = self.data[self.data["rCenter"] < lim_radius]
                 blob = small_data[["ra", "dec", "pmra", "pmdec", "parallax"]]
-                min_cluster_size = int(input("Min cluster size?"))
+                min_cluster_size = int(input("Min cluster size? (int)"))
                 clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size)
                 clusterer.fit(blob)
                 small_data["label"] = clusterer.labels_
@@ -1157,18 +1157,26 @@ class GaiaClusterMembers(object):
         # combinedMags[f] += distance;
         # combinedMags[f] += (evoModels.absCoeffs[f] - 1.0) * clust.abs;
         def offsetMag(magVal, magCol, mM, Av):
-            return magVal + mM + (self.absCoeffs[magCol] - 1.0) * Av
+            return np.array(magVal) + mM + (self.absCoeffs[magCol] - 1.0) * Av
 
+        def as_list(x):
+            if isinstance(x, np.ndarray):
+                return x.tolist()
+            elif isinstance(x, (list, tuple)):
+                return list(x)
+            else:
+                return [x]
+            
         def getObsIsochrone(iso, mM, Av):
             color1Obs = offsetMag(iso[color1], color1, mM, Av)
             color2Obs = offsetMag(iso[color2], color2, mM, Av)
             magObs = offsetMag(iso[mag], mag, mM, Av)
             return {
-                "x": color1Obs - color2Obs,
-                "y": magObs,
-                color1: iso[color1],
-                color2: iso[color2],
-                mag: iso[mag],
+                "x": as_list(color1Obs - color2Obs),
+                "y": as_list(magObs),
+                color1: as_list(iso[color1]),
+                color2: as_list(iso[color2]),
+                mag: as_list(iso[mag]),
             }
 
         # define the input for Bokeh
