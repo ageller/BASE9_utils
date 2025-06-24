@@ -245,7 +245,7 @@ class GaiaClusterMembers(object):
                 self.data["ra"], self.data["dec"], frame="icrs"
             )
             self.data["rCenter"] = self.center.separation(self.data["coord"])
-            self.data["id"] = self.data["SOURCE_ID"]
+            self.data["id"] = self.data["source_id"]
             self.data["distance"] = (
                 (self.data["parallax"])
                 .to(units.parsec, equivalencies=units.parallax())
