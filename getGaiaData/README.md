@@ -9,4 +9,4 @@ Next, download the Hunt2023.tsv, PARSEC.model.zip (then unzip), template_base9.y
 
 Run makePhot.ipynb in jupyter notebooks.
 
-Find a brief demo video [here.](https://github.com/ANNACRNN/BASE9_demo/tree/mai)
+Find a brief demo video [here](https://github.com/ANNACRNN/BASE9_demo/blob/main/demo_2025_0624.mp4) and click 'view raw' to download the mp4.
