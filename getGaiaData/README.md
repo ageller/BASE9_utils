@@ -8,3 +8,5 @@ conda activate BASE9
 Next, download the Hunt2023.tsv, PARSEC.model.zip (then unzip), template_base9.yaml, getGaiadata.py and makePhot.ipynb into the same directory.  Also download NGC_188_GaiaData.ecsv to run the code on test data if wanted.
 
 Run makePhot.ipynb in jupyter notebooks.
+
+Find a brief demo video [here.](https://github.com/ANNACRNN/BASE9_demo/tree/mai)
