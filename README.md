@@ -2,7 +2,7 @@
 Code utilities for running and analyzing results from BASE-9 
 
 # Introduction
-This pipeline is for identifying photometric binaries in open clusters and works in conjunction with the Bayesian Analysis for Stellar Evolution with Nine Variables (BASE-9) code for open clusters in which Gaia, Pan-STARRS, and 2MASS photometry is available for.  More details on this pipeline may be found in Childs et al. (in prep).  Documentation for the BASE-9 code may be found at https://github.com/BayesianStellarEvolution/base-cpp.  All parts of the pipeline use dependencies from the virtual environment, BASE9.  To create this conda environment run
+This pipeline is for identifying photometric binaries in open clusters and works in conjunction with the Bayesian Analysis for Stellar Evolution with Nine Variables (BASE-9) code for open clusters in which Gaia, Pan-STARRS, and 2MASS photometry is available for.  More details on this pipeline may be found in [Childs et al. 2024](https://ui.adsabs.harvard.edu/abs/2024ApJ...962...41C/abstract) and [Childs & Geller 2025](https://ui.adsabs.harvard.edu/abs/2025ApJ...989..104C/abstract).  Documentation for the BASE-9 code may be found at https://github.com/BayesianStellarEvolution/base-cpp.  All parts of the pipeline use dependencies from the virtual environment, BASE9.  To create this conda environment run
 
 ```
 conda create --name BASE9 -c conda-forge python=3.10 astropy astroquery jupyter scipy numpy matplotlib pandas pyyaml shapely bokeh=3.7.3 hdbscan
