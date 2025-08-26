@@ -34,8 +34,9 @@ If the parallelized version of `singlePopMcmc` is being used (see BASE-9 docs fo
 
 We provide codes within the `plotting/` directory of this repo that can be used to generate summary plots and statistics for the posterior distributions resulting from `singlePopMcmc`.  Please see the [README](https://github.com/ageller/BASE9_utils/blob/main/plotting/README.md) in that directory for more information.
 
-## BEST PRACTICES FOR `singlePopMcmc`
-To avoid `logPost = -inf`,make sure the phot file is properly formated. It is very particular. 
+### Best Practices for `singlePopMcmc`
+
+To avoid `logPost = -inf`, make sure the phot file is properly formated. It is very particular. 
 `CMprior` should be between 0.01 and 0.9 for `singlePopMcmc`.  A continuous `logPost = -inf` means there is a problem with either the phot file or the yaml file (make sure there are no nans for the prior, sigma, or starting values).  It is possible for a sampling to start in `logPost = -inf` and move out of it.
 
 ##  Parallelizing `sampleMass`
@@ -51,7 +52,7 @@ example command:
 python dividePhot.py --res ngc188.res --phot NGC_188.phot --yaml base9.yaml --nthreads 4 
 ```
 
-## NOTE: This will trim your res file to only include stage 3.  You should make a copy of it to keep the original version.
+### NOTE: This will trim your res file to only include stage 3.  You should make a copy of it to keep the original version.
 
 A typical number of threads to use for open clusters on Quest is 500.  After `sampleMass` is done running the files may be combined into one condensed file that summarizes the results with the `sampleMassParallelization/sampleMassAnalysis.ipynb` notebook.  To run the code in a Jupyter notebook call `write_data(clusterName)`.  This will read in each partion of the parallelized `sampleMass` output and summarize the results in a `file.df` file.  The `file.df` file will contain the columns:  
 
