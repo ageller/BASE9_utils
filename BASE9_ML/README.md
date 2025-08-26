@@ -20,7 +20,7 @@ The code assumes that the user has data from BASE-9 in the following format and 
 we will place the data in a `./data/` directory (though the user can choose their own root directory and 
 modify the relevant code in the notebooks accordingly).  Within the user-defined data directory, each star should have it's own `*.res` file with the filename containing the star ID.  (If there is additional text in the file name, the user can specify this in the code so that the code can identify the star ID from the filename properly.)  
 
-The data used here for NGC 2682 and NGC 6819 is available by request to Aaron Geller.
+The data used here for NGC 2682 and NGC 6819 are available by request to Aaron Geller.
 
 ## Notes
 
@@ -36,3 +36,13 @@ conda create --name base9 python=3.12 numpy jupyter matplotlib seaborn astropy p
 conda activate base9
 pip install diptest
 ```
+
+## Git notes
+
+This directory was added via `git subtree` from Justyce Watson's GitHub repo on Aug. 26, 2025 using the following command:
+
+```
+git subtree add --prefix=BASE9_ML https://github.com/justyce5/BASE9_ML.git main --squash
+```
+
+The version here (in the BASE_utils repo) will be the current version.  Note that changes made here may not be reflected in Justyce's version.  

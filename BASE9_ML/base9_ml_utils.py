@@ -14,7 +14,8 @@ from sklearn.pipeline import Pipeline
 import pickle
 
 
-def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_2682_", file_suffix="",ess_num_samples=10000):  
+def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_2682_", file_suffix="",ess_num_samples=10000, random_seed=42
+):  
     '''
     function that will calculate all the features needed for the ML model 
     Note that the file names for the res files must contain the ids (and can include a prefix and suffix)
@@ -26,6 +27,7 @@ def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_268
     - file_prefix : (string) prefix in the res file names before the id 
     - file_suffix : (string) suffix in the res file names after the id
     - ess_num_samples : (int) number of samples to use in ess normal distribution
+    - random_seed : (int) random seed used for calculating ess
 
     outputs:
     - pandas DataFrame with the calculated features (see code for more details)
@@ -40,6 +42,7 @@ def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_268
         - num_samples : number of random samples to use for calculation
         '''
         ess_values = []
+        
         for m, s in zip(mean_vals, std_dev_vals):
             # Simulate MCMC samples for each value
             samples = np.random.normal(loc=m, scale=s, size=num_samples)
@@ -65,6 +68,9 @@ def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_268
     lower = []
     
     file_count = 0
+
+    # set the random state
+    np.random.seed(random_seed) 
 
     for filename in os.listdir(directory):
         if file_count >= max_nfiles:
@@ -179,7 +185,7 @@ def create_model(
     - label_df : (pandas DataFrame) contains a label for each id in the features_df to train the model
     - label_column_name : (string) the name of the column in label_df that has the desired label for training
     - feature_columns : (list of strings) a list of column names in features_df to use for the model 
-    - random_seed : (int) used for test_train_split and RandomForestClassifier
+    - random_seed : (int) random seed used for test_train_split and RandomForestClassifier
 
     outputs:
     - pipe: scikit-learn pipeline object containing the random forest model and standard scaler
