@@ -174,7 +174,8 @@ def create_model(
         "KS_p",
         "ESS",
     ],
-    random_seed=42
+    random_seed=42,
+    enforce_balanced_training_labels=True
 ):
 
     '''
@@ -186,7 +187,8 @@ def create_model(
     - label_column_name : (string) the name of the column in label_df that has the desired label for training
     - feature_columns : (list of strings) a list of column names in features_df to use for the model 
     - random_seed : (int) random seed used for test_train_split and RandomForestClassifier
-
+    - enforce_balanced_training_labels : (bool) if True, the code will limit the amount rows in the training set with majority label to the amount with the minority label
+    
     outputs:
     - pipe: scikit-learn pipeline object containing the random forest model and standard scaler
     - X : (np array) every row is a different star, every column is a feature (same order as y)
@@ -218,25 +220,27 @@ def create_model(
     random_state = np.random.seed(random_seed)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=random_state)
 
-    # equalize the number of objects in each class for the training data
-    # get the size of the smallest class
-    u_classes = np.unique(y_train)
-    c_min = len(y_train)
-    for c in u_classes:
-        foo = len(np.where(y_train == c)[0])
-        if foo < c_min:
-            c_min = foo
-    # Get balanced indices
-    balanced_indices = np.hstack(
-        [
-            np.random.choice(np.where(y_train == c)[0], c_min, replace=False)
-            for c in u_classes
-        ]
-    )
-    # Shuffle the balanced training set
-    np.random.shuffle(balanced_indices)
-    X_train = X_train[balanced_indices]
-    y_train = y_train[balanced_indices]
+    if enforce_balanced_training_labels:
+        # equalize the number of objects in each class for the training data
+        # get the size of the smallest class
+        u_classes = np.unique(y_train)
+        c_min = len(y_train)
+        for c in u_classes:
+            foo = len(np.where(y_train == c)[0])
+            if foo < c_min:
+                c_min = foo
+        # Get balanced indices
+        balanced_indices = np.hstack(
+            [
+                np.random.choice(np.where(y_train == c)[0], c_min, replace=False)
+                for c in u_classes
+            ]
+        )
+        # Shuffle the balanced training set
+        np.random.shuffle(balanced_indices)
+        X_train = X_train[balanced_indices]
+        y_train = y_train[balanced_indices]
+
     # final check
     for c in u_classes:
         print(
@@ -248,7 +252,7 @@ def create_model(
     # The StandardScaler will shift the mean and scale to unit variance
     pipe = Pipeline([
         ('scaler', StandardScaler()),
-        ('rf', RandomForestClassifier(random_state=random_state))
+        ('rf', RandomForestClassifier(random_state=random_state, class_weight='balanced'))
     ])
 
     # fit to the training data
