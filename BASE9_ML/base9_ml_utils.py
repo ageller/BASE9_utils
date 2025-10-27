@@ -33,24 +33,6 @@ def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_268
     - pandas DataFrame with the calculated features (see code for more details)
     '''
     
-    def calculate_ess(mean_vals, std_dev_vals, num_samples=10000):
-        '''
-        function to calculate effective sample size for given
-        inputs:
-        - mean_vals : the expected mean values for the feature (array)
-        - std_vals : the expected standard deviation values for the feature (array)
-        - num_samples : number of random samples to use for calculation
-        '''
-        ess_values = []
-        
-        for m, s in zip(mean_vals, std_dev_vals):
-            # Simulate MCMC samples for each value
-            samples = np.random.normal(loc=m, scale=s, size=num_samples)
-            samples_reshaped = samples[np.newaxis, :]  # Reshape for ArviZ
-            ess = az.ess(samples_reshaped)  # Calculate ESS
-            ess_values.append(ess)
-        return ess_values
-
     # creating empty arrays for each feature
     Median = []
     Mean = []
@@ -66,6 +48,7 @@ def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_268
     ks_p = []
     upper = []
     lower = []
+    ESS = []
     
     file_count = 0
 
@@ -105,7 +88,7 @@ def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_268
                 SnR.append(feature_snr)
                 upper.append(Upper_bound)
                 lower.append(Lower_bound)
-                
+                ESS.append(az.ess(data))
 
                 # appending the source id array with sourceid value from file name
                 sid = filename.replace(".res", "").replace(file_prefix, "").replace(file_suffix, "")
@@ -131,16 +114,14 @@ def create_features(directory, column=0, max_nfiles=np.inf, file_prefix="NGC_268
             except Exception as e:
                 print(f"Error processing file {filename}: {e}")
 
-    # adding column in for calculated ESS (the function expects arrays)
-    ESS = calculate_ess(Mean, Stdev, num_samples=ess_num_samples)  
 
     # creating the DataFrame containing all the calculated features
     features_df = pd.DataFrame(
         {
             "source_id": Source_id,
             "Width": Width,
-            "Upper_bound": Upper_bound,
-            "Lower_bound": Lower_bound,
+            "Upper_bound": upper,
+            "Lower_bound": lower,
             "Stdev": Stdev,
             "SnR": SnR,
             "Dip_p": dip_p,
